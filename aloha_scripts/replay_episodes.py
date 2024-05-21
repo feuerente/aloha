@@ -8,7 +8,7 @@ from constants import JOINT_NAMES, PUPPET_GRIPPER_JOINT_OPEN
 import IPython
 e = IPython.embed
 
-STATE_NAMES = JOINT_NAMES + ["gripper", 'left_finger', 'right_finger']
+STATE_NAMES = JOINT_NAMES + ["gripper", 'left_finger']
 
 def main(args):
     dataset_dir = args['dataset_dir']
@@ -28,7 +28,7 @@ def main(args):
     for action in actions:
         env.step(action)
 
-    move_grippers([env.puppet_bot_left, env.puppet_bot_right], [PUPPET_GRIPPER_JOINT_OPEN] * 2, move_time=0.5)  # open
+    move_grippers([env.puppet_bot_left], [PUPPET_GRIPPER_JOINT_OPEN]2, move_time=0.5)  # open
 
 
 if __name__ == '__main__':

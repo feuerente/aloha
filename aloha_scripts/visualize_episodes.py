@@ -93,7 +93,7 @@ def visualize_joints(qpos_list, command_list, plot_path=None, ylim=None, label_o
     fig, axs = plt.subplots(num_figs, 1, figsize=(w, h * num_figs))
 
     # plot joint state
-    all_names = [name + '_left' for name in STATE_NAMES] + [name + '_right' for name in STATE_NAMES]
+    all_names = [name + '_left' for name in STATE_NAMES]
     for dim_idx in range(num_dim):
         ax = axs[dim_idx]
         ax.plot(qpos[:, dim_idx], label=label1)
@@ -124,7 +124,7 @@ def visualize_single(efforts_list, label, plot_path=None, ylim=None, label_overw
     fig, axs = plt.subplots(num_figs, 1, figsize=(w, h * num_figs))
 
     # plot joint state
-    all_names = [name + '_left' for name in STATE_NAMES] + [name + '_right' for name in STATE_NAMES]
+    all_names = [name + '_left' for name in STATE_NAMES]
     for dim_idx in range(num_dim):
         ax = axs[dim_idx]
         ax.plot(efforts[:, dim_idx], label=label)

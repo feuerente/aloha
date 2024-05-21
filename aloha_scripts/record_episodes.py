@@ -17,7 +17,7 @@ import IPython
 e = IPython.embed
 
 
-def opening_ceremony(master_bot_left, master_bot_right, puppet_bot_left, puppet_bot_right):
+def opening_ceremony(master_bot_left, puppet_bot_left):
     """ Move all 4 robots to a pose where it is easy to start demonstration """
     # reboot gripper motors, and set operating modes for all motors
     puppet_bot_left.dxl.robot_reboot_motors("single", "gripper", True)
@@ -27,40 +27,28 @@ def opening_ceremony(master_bot_left, master_bot_right, puppet_bot_left, puppet_
     master_bot_left.dxl.robot_set_operating_modes("single", "gripper", "position")
     # puppet_bot_left.dxl.robot_set_motor_registers("single", "gripper", 'current_limit', 1000) # TODO(tonyzhaozh) figure out how to set this limit
 
-    puppet_bot_right.dxl.robot_reboot_motors("single", "gripper", True)
-    puppet_bot_right.dxl.robot_set_operating_modes("group", "arm", "position")
-    puppet_bot_right.dxl.robot_set_operating_modes("single", "gripper", "current_based_position")
-    master_bot_right.dxl.robot_set_operating_modes("group", "arm", "position")
-    master_bot_right.dxl.robot_set_operating_modes("single", "gripper", "position")
-    # puppet_bot_left.dxl.robot_set_motor_registers("single", "gripper", 'current_limit', 1000) # TODO(tonyzhaozh) figure out how to set this limit
-
     torque_on(puppet_bot_left)
     torque_on(master_bot_left)
-    torque_on(puppet_bot_right)
-    torque_on(master_bot_right)
 
     # move arms to starting position
     start_arm_qpos = START_ARM_POSE[:6]
-    move_arms([master_bot_left, puppet_bot_left, master_bot_right, puppet_bot_right], [start_arm_qpos] * 4, move_time=1.5)
+    move_arms([master_bot_left, puppet_bot_left], [start_arm_qpos] * 2, move_time=1.5)
     # move grippers to starting position
-    move_grippers([master_bot_left, puppet_bot_left, master_bot_right, puppet_bot_right], [MASTER_GRIPPER_JOINT_MID, PUPPET_GRIPPER_JOINT_CLOSE] * 2, move_time=0.5)
+    move_grippers([master_bot_left, puppet_bot_left], [MASTER_GRIPPER_JOINT_MID, PUPPET_GRIPPER_JOINT_CLOSE], move_time=0.5)
 
 
     # press gripper to start data collection
     # disable torque for only gripper joint of master robot to allow user movement
     master_bot_left.dxl.robot_torque_enable("single", "gripper", False)
-    master_bot_right.dxl.robot_torque_enable("single", "gripper", False)
     print(f'Close the gripper to start')
     close_thresh = -0.3
     pressed = False
     while not pressed:
         gripper_pos_left = get_arm_gripper_positions(master_bot_left)
-        gripper_pos_right = get_arm_gripper_positions(master_bot_right)
-        if (gripper_pos_left < close_thresh) and (gripper_pos_right < close_thresh):
+        if gripper_pos_left < close_thresh:
             pressed = True
         time.sleep(DT/10)
     torque_off(master_bot_left)
-    torque_off(master_bot_right)
     print(f'Started!')
 
 
@@ -70,8 +58,6 @@ def capture_one_episode(dt, max_timesteps, camera_names, dataset_dir, dataset_na
     # source of data
     master_bot_left = InterbotixManipulatorXS(robot_model="wx250s", group_name="arm", gripper_name="gripper",
                                               robot_name=f'master_left', init_node=True)
-    master_bot_right = InterbotixManipulatorXS(robot_model="wx250s", group_name="arm", gripper_name="gripper",
-                                               robot_name=f'master_right', init_node=False)
     env = make_real_env(init_node=False, setup_robots=False)
 
     # saving dataset
@@ -83,7 +69,7 @@ def capture_one_episode(dt, max_timesteps, camera_names, dataset_dir, dataset_na
         exit()
 
     # move all 4 robots to a starting pose where it is easy to start teleoperation, then wait till both gripper closed
-    opening_ceremony(master_bot_left, master_bot_right, env.puppet_bot_left, env.puppet_bot_right)
+    opening_ceremony(master_bot_left, env.puppet_bot_left)
 
     # Data collection
     ts = env.reset(fake=True)
@@ -92,7 +78,7 @@ def capture_one_episode(dt, max_timesteps, camera_names, dataset_dir, dataset_na
     actual_dt_history = []
     for t in tqdm(range(max_timesteps)):
         t0 = time.time() #
-        action = get_action(master_bot_left, master_bot_right)
+        action = get_action(master_bot_left)
         t1 = time.time() #
         ts = env.step(action)
         t2 = time.time() #
@@ -102,9 +88,8 @@ def capture_one_episode(dt, max_timesteps, camera_names, dataset_dir, dataset_na
 
     # Torque on both master bots
     torque_on(master_bot_left)
-    torque_on(master_bot_right)
     # Open puppet grippers
-    move_grippers([env.puppet_bot_left, env.puppet_bot_right], [PUPPET_GRIPPER_JOINT_OPEN] * 2, move_time=0.5)
+    move_grippers([env.puppet_bot_left], [PUPPET_GRIPPER_JOINT_OPEN], move_time=0.5)
 
     freq_mean = print_dt_diagnosis(actual_dt_history)
     if freq_mean < 42:
@@ -211,7 +196,7 @@ def print_dt_diagnosis(actual_dt_history):
 
 def debug():
     print(f'====== Debug mode ======')
-    recorder = Recorder('right', is_debug=True)
+    recorder = Recorder('left', is_debug=True)
     image_recorder = ImageRecorder(init_node=False, is_debug=True)
     while True:
         time.sleep(1)
