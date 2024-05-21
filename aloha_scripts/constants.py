@@ -8,6 +8,12 @@ TASK_CONFIGS = {
         'episode_len': 1000,
         'camera_names': ['cam_high', 'cam_low', 'cam_left_wrist', 'cam_right_wrist']
     },
+    'aloha_furniture_bench': {
+        'dataset_dir': DATA_DIR + '/aloha_furniture_bench',
+        'num_episodes': 50,
+        'episode_len': 1000,
+        'camera_names': ['cam_high', 'cam_low', 'cam_left_wrist']
+    },
 }
 
 ### ALOHA fixed constants
