@@ -17,12 +17,16 @@ class FakeEnv:
         obs['qpos'] = self.qpos[self.index,...]
         obs['qvel'] = self.qvel[self.index,...]
         obs['effort'] = self.effort[self.index,...]
-        obs['cam_low'] = self.cam_low[self.index,...]
+        obs['images'] = {}
+        obs['images']['cam_low'] = self.cam_low[self.index,...]
         self.index = self.index + 1
         return obs
     
-    def step(self):
-        return self.reset_env()
+    def step(self,action):
+        return self.reset()
+    
+    def get_observation(self):
+        return self.reset()
     
 def make_real_env(init_node, setup_robots=True):
     env = FakeEnv()
