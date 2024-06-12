@@ -1,9 +1,12 @@
-import numpy as np
 import time
-from constants import DT
-from interbotix_xs_msgs.msg import JointSingleCommand
 
 import IPython
+import numpy as np
+from interbotix_xs_msgs.msg import JointSingleCommand
+
+from utils.apriltag import AprilTag
+from constants import DT, config
+
 e = IPython.embed
 
 class ImageRecorder:
@@ -60,6 +63,12 @@ class ImageRecorder:
         cam_name = 'cam_right_wrist'
         return self.image_cb(cam_name, data)
 
+    def get_cam_low_image(self):
+        return getattr(self, f'cam_low_image')
+
+    def get_cam_high_image(self):
+        return getattr(self, f'cam_high_image')
+
     def get_images(self):
         image_dict = dict()
         for cam_name in self.camera_names:
@@ -75,6 +84,24 @@ class ImageRecorder:
             image_freq = 1 / dt_helper(getattr(self, f'{cam_name}_timestamps'))
             print(f'{cam_name} {image_freq=:.2f}')
         print()
+
+
+def read_detect(
+        april_tag: AprilTag, image_recorder: ImageRecorder
+):
+    cam_low_frame = image_recorder.get_cam_low_image()
+    cam_low_intr_param = config["camera"]["cam_low"]["intr_param"]
+    cam_high_frame = image_recorder.get_cam_high_image()
+    cam_high_intr_param = config["camera"]["cam_high"]["intr_param"]
+
+    tags_low = april_tag.detect_id(cam_low_frame, cam_low_intr_param)
+    tags_high = april_tag.detect_id(cam_high_frame, cam_high_intr_param)
+
+    return (
+        tags_low,
+        tags_high,
+    )
+
 
 class Recorder:
     def __init__(self, side, init_node=True, is_debug=False):

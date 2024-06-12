@@ -1,12 +1,69 @@
 ### Task parameters
+from typing import Dict, Any
 
-DATA_DIR = '<put your data dir here>'
+from utils.pose import get_mat
+
+DATA_DIR = 'data'
 TASK_CONFIGS = {
     'aloha_wear_shoe':{
         'dataset_dir': DATA_DIR + '/aloha_wear_shoe',
         'num_episodes': 50,
         'episode_len': 1000,
         'camera_names': ['cam_high', 'cam_low', 'cam_left_wrist', 'cam_right_wrist']
+    },
+    'aloha_furniture':{
+        'dataset_dir': DATA_DIR + '/aloha_furniture',
+        'num_episodes': 50,
+        'episode_len': 1000,
+        'camera_names': ['cam_high', 'cam_low']
+    },
+}
+
+config: Dict[str, Any] = {
+    "furniture": {
+        "detection_hz": 1,  # TODO
+        "base_tags": [0, 1, 2, 3],  # TODO what?
+        "base_tag_size": 0.048,
+        "rel_pose_from_coordinate": {  # TODO
+            0: get_mat([-0.03, -0.03, 0], [0, 0, 0]),
+            1: get_mat([0.03, -0.03, 0], [0, 0, 0]),
+            2: get_mat([-0.03, 0.03, 0], [0, 0, 0]),
+            3: get_mat([0.03, 0.03, 0], [0, 0, 0]),
+        },
+        "square_table": {
+            "tag_size": 0.0195,
+            "square_table_top": {
+                "ids": [4, 5, 6, 7],
+            },
+            "square_table_leg1": {
+                "ids": [8, 9, 10, 11],
+            },
+            "square_table_leg2": {
+                "ids": [12, 13, 14, 15],
+            },
+            "square_table_leg3": {
+                "ids": [16, 17, 18, 19],
+            },
+            "square_table_leg4": {
+                "ids": [20, 21, 22, 23],
+            },
+        },
+        "table_leg": {
+            "tag_size": 0.0195,
+            "square_table_leg1": {
+                "ids": [8, 9, 10, 11],
+            },
+        },
+    },
+    "camera": {
+        "cam_low": {
+            # Camera parameters fx, fy, cx, cy
+            "intr_param": [635.6, 637.4, 311.6, 231.5],
+        },
+        "cam_high": {
+            # Camera parameters fx, fy, cx, cy
+            "intr_param": [635.6, 637.4, 311.6, 231.5],
+        },
     },
 }
 

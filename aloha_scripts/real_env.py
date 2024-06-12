@@ -1,19 +1,22 @@
-import time
-import numpy as np
 import collections
-import matplotlib.pyplot as plt
-import dm_env
+import time
 
-from constants import DT, START_ARM_POSE, MASTER_GRIPPER_JOINT_NORMALIZE_FN, PUPPET_GRIPPER_JOINT_UNNORMALIZE_FN
-from constants import PUPPET_GRIPPER_POSITION_NORMALIZE_FN, PUPPET_GRIPPER_VELOCITY_NORMALIZE_FN
-from constants import PUPPET_GRIPPER_JOINT_OPEN, PUPPET_GRIPPER_JOINT_CLOSE
-from robot_utils import Recorder, ImageRecorder
-from robot_utils import setup_master_bot, setup_puppet_bot, move_arms, move_grippers
+import IPython
+import dm_env
+import matplotlib.pyplot as plt
+import numpy as np
 from interbotix_xs_modules.arm import InterbotixManipulatorXS
 from interbotix_xs_msgs.msg import JointSingleCommand
 
-import IPython
+from furniture import furniture_factory
+from constants import DT, START_ARM_POSE, MASTER_GRIPPER_JOINT_NORMALIZE_FN, PUPPET_GRIPPER_JOINT_UNNORMALIZE_FN
+from constants import PUPPET_GRIPPER_JOINT_OPEN, PUPPET_GRIPPER_JOINT_CLOSE
+from constants import PUPPET_GRIPPER_POSITION_NORMALIZE_FN, PUPPET_GRIPPER_VELOCITY_NORMALIZE_FN
+from robot_utils import Recorder, ImageRecorder
+from robot_utils import setup_master_bot, setup_puppet_bot, move_arms, move_grippers
+
 e = IPython.embed
+
 
 class RealEnv:
     """
@@ -37,7 +40,12 @@ class RealEnv:
                                    "cam_right_wrist": (480x640x3)} # h, w, c, dtype='uint8'
     """
 
-    def __init__(self, init_node, setup_robots=True):
+    def __init__(
+            self,
+            init_node,
+            furniture: str,
+            setup_robots=True,
+    ):
         self.puppet_bot_left = InterbotixManipulatorXS(robot_model="vx300s", group_name="arm", gripper_name="gripper",
                                                        robot_name=f'puppet_left', init_node=init_node)
         self.puppet_bot_right = InterbotixManipulatorXS(robot_model="vx300s", group_name="arm", gripper_name="gripper",
@@ -49,6 +57,10 @@ class RealEnv:
         self.recorder_right = Recorder('right', init_node=False)
         self.image_recorder = ImageRecorder(init_node=False)
         self.gripper_command = JointSingleCommand(name="gripper")
+
+        self.furniture = furniture_factory(furniture)
+        # self.image_recorder = self.furniture.start_detection()
+        self.furniture.start_detection()
 
     def setup_robots(self):
         setup_puppet_bot(self.puppet_bot_left)
@@ -106,6 +118,7 @@ class RealEnv:
         obs['qvel'] = self.get_qvel()
         obs['effort'] = self.get_effort()
         obs['images'] = self.get_images()
+        obs['parts_poses'], _ = self.furniture.get_parts_poses()
         return obs
 
     def get_reward(self):
@@ -129,7 +142,7 @@ class RealEnv:
         left_action = action[:state_len]
         right_action = action[state_len:]
         self.puppet_bot_left.arm.set_joint_positions(left_action[:6], blocking=False)
-        self.puppet_bot_right.arm.set_joint_positions(right_action[:6], blocking=False)
+        # self.puppet_bot_right.arm.set_joint_positions(right_action[:6], blocking=False)
         self.set_gripper_pose(left_action[-1], right_action[-1])
         time.sleep(DT)
         return dm_env.TimeStep(
@@ -151,8 +164,8 @@ def get_action(master_bot_left, master_bot_right):
     return action
 
 
-def make_real_env(init_node, setup_robots=True):
-    env = RealEnv(init_node, setup_robots)
+def make_real_env(init_node, furniture="square_table", setup_robots=True):
+    env = RealEnv(init_node, furniture, setup_robots=setup_robots)
     return env
 
 
