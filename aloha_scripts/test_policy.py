@@ -10,8 +10,8 @@ import copy
 
 from trajectory_diffusion.utils.setup_helper import setup_agent_and_workspace, parse_wandb_to_hydra_config
 from trajectory_diffusion.datasets.scalers import normalize, normalize
-#from real_env import make_real_env, get_action
-from fake_env import make_real_env
+from real_env import make_real_env, get_action
+#from fake_env import make_real_env
 from tqdm import tqdm
 import time
 import os
@@ -23,12 +23,12 @@ CONFIG = "test_trained_agent_in_env_furniture"
 max_timesteps = 10
 t_obs = 3
 ACTION_HORIZON = 1
-camera_names = ['cam_low']#'cam_high',  'cam_left_wrist', 'cam_right_wrist'
+camera_names = []#'cam_low','cam_high']#'cam_left_wrist', 'cam_right_wrist'
 dataset_dir = 'data/task_1/'
 
 
 
-@hydra.main(version_base=None, config_path="../../trajectory-diffusion-prak/conf", config_name=CONFIG)
+@hydra.main(version_base=None, config_path="/home/studentgroup1/trajectory-diffusion-prak/conf", config_name=CONFIG)
 def main(cfg: DictConfig) -> None:
     # Load wandb config
     wandb_config = OmegaConf.load(cfg.config)
@@ -46,6 +46,7 @@ def main(cfg: DictConfig) -> None:
     #hydra_config = OmegaConf.merge(hydra_config, cfg.to_change)
 
     # Setup agent, and workspace
+    hydra_config['device'] = 'cpu'
     agent, workspace = setup_agent_and_workspace(hydra_config)
     #setup constant values
     read_config(hydra_config)
@@ -53,10 +54,10 @@ def main(cfg: DictConfig) -> None:
     agent.load_pretrained(cfg.weights)
  
     #prepare the real environment
-    env = make_real_env(init_node=False, setup_robots=False)
+    env = make_real_env(init_node=True, furniture="table_leg", setup_robots=True)
     # Data collection
-    ts = env.reset(fake=True)
-    timesteps = [ts]
+    ts = env.reset(fake=False)
+    timesteps = [ts.observation]
     for i in range(t_obs-1):
         ts = env.get_observation()
         timesteps.append(ts)
@@ -92,6 +93,7 @@ def main(cfg: DictConfig) -> None:
         '/observations/qpos': [],
         '/observations/qvel': [],
         '/observations/effort': [],
+        '/obsevations/parts_poses':[],
         '/action': [],
 
     }
@@ -105,6 +107,7 @@ def main(cfg: DictConfig) -> None:
         data_dict['/observations/qpos'].append(ts['qpos'])
         data_dict['/observations/qvel'].append(ts['qvel'])
         data_dict['/observations/effort'].append(ts['effort'])
+        data_dict['/observations/parts_poses'].append(ts['parts_poses'])
         data_dict['/action'].append(action)
         for cam_name in camera_names:
             data_dict[f'/observations/images/{cam_name}'].append(ts['images'][cam_name])
@@ -124,6 +127,7 @@ def main(cfg: DictConfig) -> None:
         _ = obs.create_dataset('qpos', (max_timesteps, number_joints))
         _ = obs.create_dataset('qvel', (max_timesteps, number_joints))
         _ = obs.create_dataset('effort', (max_timesteps, number_joints))
+        _ = obs.create_dataset('parts_poses', (max_timesteps, 7))
         _ = root.create_dataset('action', (max_timesteps, number_joints))
 
         for name, array in data_dict.items():
@@ -145,17 +149,17 @@ def adjust_images(observation):
     # for key in observations: #use key images on real stuff ['images']
     #     observations[key] = np.moveaxis(observations[key],-1,1) #dont forgetkey images
 
-    for cam_name in camera_names:
-        observation['images'][cam_name] = np.moveaxis(observation['images'][cam_name],-1,0)[...,:CROP_SIZES[0],:CROP_SIZES[1]]
+    # for cam_name in camera_names:
+    #     observation['images'][cam_name] = np.moveaxis(observation['images'][cam_name],-1,0)[...,:CROP_SIZES[0],:CROP_SIZES[1]]
     #TODO normalize pixels to [0,1] by dividing by 255
     for key, value in observation.items():
         if key == 'images':
-            for cam_name in IMAGE_KEYS:
-                observation[key][cam_name] = torch.tensor(value[cam_name])[...] 
+            # for cam_name in IMAGE_KEYS:
+            #     observation[key][cam_name] = torch.tensor(value[cam_name])[...] 
             continue
-        observation[key] = torch.tensor(value)[...]
-    for cam_name in IMAGE_KEYS:
-        observation['images'][cam_name] = observation['images'][cam_name].type(torch.FloatTensor)
+        observation[key] = torch.tensor(value,dtype=torch.float32)[...]
+    # for cam_name in IMAGE_KEYS:
+    #     observation['images'][cam_name] = observation['images'][cam_name].type(torch.FloatTensor)
     return observation
 
 def last_observations(observations):
@@ -163,8 +167,8 @@ def last_observations(observations):
     obs = dict()
     for key in observations[0].keys():
         if key == 'images':
-            for cam_name in IMAGE_KEYS:
-                obs[cam_name] = torch.stack([observation[key][cam_name] for observation in observations])[None,...]
+            # for cam_name in IMAGE_KEYS:
+            #     obs[cam_name] = torch.stack([observation[key][cam_name] for observation in observations])[None,...]
             continue
         obs[key] = torch.stack([observation[key] for observation in observations])[None,...]
         
@@ -197,10 +201,10 @@ def read_config(hydra_config):
     global SCALER_VALUES,NORMALIZE_KEYS, STANDARDIZE_KEYS, NORMALIZE_IMAGES,CROP_SIZES,IMAGE_KEYS, RANDOM_CROP, PAD_START, PAD_END, NORMALIZE_SYMMETRICALLY
     SCALER_VALUES = OmegaConf.to_container(hydra_config['workspace_config']['env_config']['scaler_config']['scaler_values'])
     dataset_confs = OmegaConf.to_container(hydra_config['dataset_config'])
-    NORMALIZE_IMAGES = dataset_confs['normalize_images']
-    CROP_SIZES = dataset_confs['crop_sizes'][0]
-    IMAGE_KEYS = dataset_confs['image_keys']
-    RANDOM_CROP = dataset_confs['random_crop']
+    #NORMALIZE_IMAGES = dataset_confs['normalize_images']
+    #CROP_SIZES = dataset_confs['crop_sizes'][0]
+    #IMAGE_KEYS = dataset_confs['image_keys']
+    #RANDOM_CROP = dataset_confs['random_crop']
     PAD_START = dataset_confs['pad_start']
     PAD_END = dataset_confs['pad_end']
     NORMALIZE_SYMMETRICALLY = dataset_confs['normalize_symmetrically']
