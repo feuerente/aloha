@@ -1,7 +1,12 @@
 name: aloha
+channels:
+  - numba
+  - defaults
 dependencies:
-  - python=3.8.10
+  - python=3.10
   - pip=24.0
+  - numpy=1.26.4
+  - numba
   - pip:
     - torchvision
     - torch
