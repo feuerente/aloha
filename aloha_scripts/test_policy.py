@@ -13,6 +13,7 @@ from trajectory_diffusion.datasets.scalers import normalize, normalize
 from real_env import make_real_env, get_action
 #from fake_env import make_real_env
 from tqdm import tqdm
+import modern_robotics as mr
 import time
 import os
 from trajectory_diffusion.datasets.scalers import standardize, normalize, denormalize, destandardize
@@ -23,6 +24,7 @@ CONFIG = "test_trained_agent_in_env_furniture"
 max_timesteps = 10
 t_obs = 3
 ACTION_HORIZON = 1
+MOVING_TIME = 20 # in seconds
 camera_names = []#'cam_low','cam_high']#'cam_left_wrist', 'cam_right_wrist'
 dataset_dir = 'data/task_1/'
 
@@ -81,7 +83,21 @@ def main(cfg: DictConfig) -> None:
             action = destandardize(action, SCALER_VALUES['action'])
         for i in range(ACTION_HORIZON):
             t1 = time.time() #
-            ts = env.step(action[i])
+            current_pos = env.puppet_bot_left.get_ee_pose()
+            destination = mr.FKinSpace(env.puppet_bot_left.robot_des.M, env.puppet_bot_left.robot_des.Slist, action[i])
+            #compare the current position with the destination such that we don t make to big steps
+            #according to stackoverflow this gives us the offset between the two matrices
+            #we could also just calculate the distance between the translation vectors of the transformation matrix
+            offset = np.linalg.inv(current_pos) * destination
+            #We will have to findout what proper distances are
+            #check the translation vector
+            if np.linalg.norm(offset[3,0:3]) > 0.01:
+                print("Warning: The offset is too big!")
+                while(True):
+                    #wait for the user to press enter
+                    if input("Press enter to continue") == "":
+                        break
+            ts = env.step(action[i],moving_time=MOVING_TIME )
             t2 = time.time() #
             timesteps.append(ts)
             actions.append(action[i])
