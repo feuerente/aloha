@@ -18,6 +18,20 @@ from robot_utils import setup_master_bot, setup_puppet_bot, move_arms, move_grip
 e = IPython.embed
 
 
+def filter_parts_poses(parts_poses, parts_found):
+    first_true_idx = [idx for idx, val in enumerate(parts_found) if val][0]
+    last_pose = parts_poses[first_true_idx]
+
+    parts_poses_filtered = []
+    for idx, parts_pose in enumerate(parts_poses):
+        if not parts_found[idx]:
+            parts_pose = last_pose
+        last_pose = parts_pose
+        parts_poses_filtered.append(parts_pose)
+
+    return parts_poses_filtered
+
+
 class RealEnv:
     """
     Environment for real robot bi-manual manipulation
@@ -94,6 +108,10 @@ class RealEnv:
     def get_images(self):
         return self.image_recorder.get_images()
 
+    def get_parts_poses(self):
+        parts_poses, parts_found = self.furniture.get_parts_poses()
+        return filter_parts_poses(parts_poses, parts_found)
+
     def set_gripper_pose(self, left_gripper_desired_pos_normalized, right_gripper_desired_pos_normalized):
         left_gripper_desired_joint = PUPPET_GRIPPER_JOINT_UNNORMALIZE_FN(left_gripper_desired_pos_normalized)
         self.gripper_command.cmd = left_gripper_desired_joint
@@ -118,7 +136,7 @@ class RealEnv:
         obs['qvel'] = self.get_qvel()
         obs['effort'] = self.get_effort()
         obs['images'] = self.get_images()
-        obs['parts_poses'], _ = self.furniture.get_parts_poses()
+        obs['parts_poses'] = self.get_parts_poses()
         return obs
 
     def get_reward(self):
