@@ -49,6 +49,9 @@ def main(args):
 
 
 def save_videos(video, dt, video_path=None):
+    if len(video) == 0:
+        print("No video saved: Images not found!")
+        return
     if isinstance(video, list):
         cam_names = list(video[0].keys())
         h, w, _ = video[0][cam_names[0]].shape
