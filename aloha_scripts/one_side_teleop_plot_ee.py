@@ -53,7 +53,7 @@ def teleop(robot_side):
     prep_robots(master_bot, puppet_bot)
     press_to_start(master_bot)
 
-    fix, ax = plt.subplot()
+    fix, ax = plt.subplots()
     ee_poses = deque(maxlen=50)
 
     ### Teleoperation loop
@@ -72,16 +72,17 @@ def teleop(robot_side):
         # time.sleep(DT)
 
         ee_pose = puppet_bot.arm.get_ee_pose()
-        print(f"EE Translation: [{ee_pose[0]:.2f}, {ee_pose[0]:.2f}, {ee_pose[0]:.2f}]")
+        print(f"EE pose: {ee_pose[0,3]}, {ee_pose[1,3]}, {ee_pose[2,3]}, ")
+        #print(f"EE Translation: [{ee_pose[0]:.2f}, {ee_pose[0]:.2f}, {ee_pose[0]:.2f}]")
         ee_poses.append(ee_pose)
 
         # Clear the plots
         ax.cla()
 
         poses_array = np.array(ee_poses)
-        ax.plot(poses_array[:, 0], label='x')
-        ax.plot(poses_array[:, 1], label='y')
-        ax.plot(poses_array[:, 2], label='z')
+        ax.plot(poses_array[:, 0, 3], label='x')
+        ax.plot(poses_array[:, 1, 3], label='y')
+        ax.plot(poses_array[:, 2, 3], label='z')
         ax.legend(loc='upper right')
         ax.set_title('Pose Translation')
 
