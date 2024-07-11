@@ -22,9 +22,10 @@ OmegaConf.register_new_resolver("eval", eval)
 
 CONFIG = "test_trained_agent_in_env_furniture"
 max_timesteps = 10
-t_obs = 3
+t_obs = 10
 ACTION_HORIZON = 1
 MOVING_TIME = 20 # in seconds
+ACCEL_TIME = MOVING_TIME/2
 camera_names = []#'cam_low','cam_high']#'cam_left_wrist', 'cam_right_wrist'
 dataset_dir = 'data/task_1/'
 
@@ -73,7 +74,7 @@ def main(cfg: DictConfig) -> None:
         normalize_last_observation(observations[-1])
         standardize_last_obserservation(observations[-1])
         last_obs = last_observations(observations[-t_obs:])
-
+        last_obs.pop('effort',None)
         #TODO image_transforms
         action = torch.squeeze(agent.predict(observation=last_obs,extra_inputs=dict()))
         #unnormalize and unstandardize the action if necessary
@@ -83,25 +84,33 @@ def main(cfg: DictConfig) -> None:
             action = destandardize(action, SCALER_VALUES['action'])
         for i in range(ACTION_HORIZON):
             t1 = time.time() #
-            current_pos = env.puppet_bot_left.get_ee_pose()
-            destination = mr.FKinSpace(env.puppet_bot_left.robot_des.M, env.puppet_bot_left.robot_des.Slist, action[i])
+            current_pos = env.puppet_bot_left.arm.get_ee_pose()
+            destination = mr.FKinSpace(env.puppet_bot_left.arm.robot_des.M, env.puppet_bot_left.arm.robot_des.Slist, action[0:6].detach().numpy())
+            print(destination)
             #compare the current position with the destination such that we don t make to big steps
             #according to stackoverflow this gives us the offset between the two matrices
             #we could also just calculate the distance between the translation vectors of the transformation matrix
             offset = np.linalg.inv(current_pos) * destination
             #We will have to findout what proper distances are
             #check the translation vector
-            if np.linalg.norm(offset[3,0:3]) > 0.01:
-                print("Warning: The offset is too big!")
+            if destination[2,3] < 0.05:
+                print("Warning: Height will be to low")
                 while(True):
                     #wait for the user to press enter
                     if input("Press enter to continue") == "":
-                        break
-            ts = env.step(action[i],moving_time=MOVING_TIME )
+                        break   
+
+            # if np.linalg.norm(offset[0:3,3]) > 0.01:
+            #     print("Warning: The offset is too big!")
+            #     while(True):
+            #         #wait for the user to press enter
+            #         if input("Press enter to continue") == "":
+            #             break
+            ts = env.step(action, moving_time=MOVING_TIME, acceleration_time = ACCEL_TIME )
             t2 = time.time() #
             timesteps.append(ts)
             actions.append(action[i])
-            observations.append(adjust_images(copy.deepcopy(ts)))
+            observations.append(adjust_images(copy.deepcopy(ts.observation)))
             actual_dt_history.append([t0, t1, t2])
     
     #save the data
