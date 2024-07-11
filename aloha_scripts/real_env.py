@@ -18,20 +18,6 @@ from robot_utils import setup_master_bot, setup_puppet_bot, move_arms, move_grip
 e = IPython.embed
 
 
-def filter_parts_poses(parts_poses, parts_found):
-    first_true_idx = [idx for idx, val in enumerate(parts_found) if val][0]
-    last_pose = parts_poses[first_true_idx]
-
-    parts_poses_filtered = []
-    for idx, parts_pose in enumerate(parts_poses):
-        if not parts_found[idx]:
-            parts_pose = last_pose
-        last_pose = parts_pose
-        parts_poses_filtered.append(parts_pose)
-
-    return parts_poses_filtered
-
-
 class RealEnv:
     """
     Environment for real robot bi-manual manipulation
@@ -73,6 +59,7 @@ class RealEnv:
         self.gripper_command = JointSingleCommand(name="gripper")
 
         self.furniture = furniture_factory(furniture)
+        self.last_parts_pose = [0] * self.furniture.num_parts * 7
         # self.image_recorder = self.furniture.start_detection()
         self.furniture.start_detection()
 
@@ -109,8 +96,16 @@ class RealEnv:
         return self.image_recorder.get_images()
 
     def get_parts_poses(self):
+        """
+        Return the poses of the parts.
+        Handle parts not found by using the last value for that pose.
+        """
         parts_poses, parts_found = self.furniture.get_parts_poses()
-        return filter_parts_poses(parts_poses, parts_found)
+        for part_idx, part_found in enumerate(parts_found):
+            if not part_found:
+                parts_poses[part_idx * 7: (part_idx + 1) * 7] = self.last_parts_pose[part_idx * 7: (part_idx + 1) * 7]
+            self.last_parts_pose = parts_poses
+            return parts_poses
 
     def set_gripper_pose(self, left_gripper_desired_pos_normalized, right_gripper_desired_pos_normalized):
         left_gripper_desired_joint = PUPPET_GRIPPER_JOINT_UNNORMALIZE_FN(left_gripper_desired_pos_normalized)
