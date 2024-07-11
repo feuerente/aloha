@@ -24,10 +24,10 @@ CONFIG = "test_trained_agent_in_env_furniture"
 max_timesteps = 10
 t_obs = 10
 ACTION_HORIZON = 1
-MOVING_TIME = 20 # in seconds
-ACCEL_TIME = MOVING_TIME/2
 camera_names = []#'cam_low','cam_high']#'cam_left_wrist', 'cam_right_wrist'
 dataset_dir = 'data/task_1/'
+MOVE_TIME_ARM     = 10  # in seconds
+MOVE_TIME_GRIPPER =  5  # in seconds
 
 
 
@@ -106,7 +106,7 @@ def main(cfg: DictConfig) -> None:
             #         #wait for the user to press enter
             #         if input("Press enter to continue") == "":
             #             break
-            ts = env.step(action, moving_time=MOVING_TIME, acceleration_time = ACCEL_TIME )
+            ts = env.step(action, move_time_arm=MOVE_TIME_ARM, move_time_gripper=MOVE_TIME_GRIPPER)
             t2 = time.time() #
             timesteps.append(ts)
             actions.append(action[i])
