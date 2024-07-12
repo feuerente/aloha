@@ -14,14 +14,14 @@ TASK_CONFIGS = {
     'aloha_furniture':{
         'dataset_dir': DATA_DIR + '/aloha_furniture',
         'num_episodes': 50,
-        'episode_len': 1000,
-        'camera_names': ['cam_high', 'cam_low']
+        'episode_len': 1200,
+        'camera_names': []
     },
 }
 
 config: Dict[str, Any] = {
     "furniture": {
-        "detection_hz": 30,  # TODO
+        "detection_hz": 30,  # Check cam fps high enought
         "tag_family": "tag16h5",
         "base_tags": [0, 1, 2, 3],  # TODO what?
         "base_tag_size": 0.047,

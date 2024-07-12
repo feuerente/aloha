@@ -21,13 +21,13 @@ log = logging.getLogger(__name__)
 OmegaConf.register_new_resolver("eval", eval)
 
 CONFIG = "test_trained_agent_in_env_furniture"
-max_timesteps = 10
+max_timesteps = 1000
 t_obs = 10
 ACTION_HORIZON = 1
 camera_names = []#'cam_low','cam_high']#'cam_left_wrist', 'cam_right_wrist'
 dataset_dir = 'data/task_1/'
-MOVE_TIME_ARM     = 10  # in seconds
-MOVE_TIME_GRIPPER =  5  # in seconds
+MOVE_TIME_ARM     =  3  # in seconds
+MOVE_TIME_GRIPPER =  0  # in seconds
 
 
 
@@ -109,7 +109,7 @@ def main(cfg: DictConfig) -> None:
             ts = env.step(action, move_time_arm=MOVE_TIME_ARM, move_time_gripper=MOVE_TIME_GRIPPER)
             t2 = time.time() #
             timesteps.append(ts)
-            actions.append(action[i])
+            actions.append(action)
             observations.append(adjust_images(copy.deepcopy(ts.observation)))
             actual_dt_history.append([t0, t1, t2])
     
@@ -118,7 +118,7 @@ def main(cfg: DictConfig) -> None:
         '/observations/qpos': [],
         '/observations/qvel': [],
         '/observations/effort': [],
-        '/obsevations/parts_poses':[],
+        '/observations/parts_poses':[],
         '/action': [],
 
     }
@@ -148,7 +148,7 @@ def main(cfg: DictConfig) -> None:
         for cam_name in camera_names:
             _ = image.create_dataset(cam_name, (max_timesteps, 480, 640, 3), dtype='uint8',
                                      chunks=(1, 480, 640, 3), )
-        number_joints = 7
+        number_joints = 14
         _ = obs.create_dataset('qpos', (max_timesteps, number_joints))
         _ = obs.create_dataset('qvel', (max_timesteps, number_joints))
         _ = obs.create_dataset('effort', (max_timesteps, number_joints))

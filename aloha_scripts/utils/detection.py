@@ -15,16 +15,17 @@ from utils.pose import comp_avg_pose
 
 def detection_loop(parts, num_parts, tag_size, lock, shm, shared_dict):
     print("Start detection")
+
+    april_tag = AprilTag(tag_size)
+
     image_recorder = ImageRecorder(init_node=True)
     # image_recorder = shared_dict["image_recorder"]
     cam_low_frame = image_recorder.get_cam_low_image()
     cam_low_intr_param = config["camera"]["cam_low"]["intr_param"]
-    cam_low_to_base = get_cam_to_base(img=cam_low_frame, cam_intr=cam_low_intr_param)
+    cam_low_to_base = get_cam_to_base(img=cam_low_frame, cam_intr=cam_low_intr_param, april_tag=april_tag)
     cam_high_frame = image_recorder.get_cam_high_image()
     cam_high_intr_param = config["camera"]["cam_high"]["intr_param"]
-    cam_high_to_base = get_cam_to_base(img=cam_high_frame, cam_intr=cam_high_intr_param)
-
-    april_tag = AprilTag(tag_size)
+    cam_high_to_base = get_cam_to_base(img=cam_high_frame, cam_intr=cam_high_intr_param, april_tag=april_tag)
 
     detection_deltas = deque(maxlen=5)
 

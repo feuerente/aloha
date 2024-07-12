@@ -150,21 +150,7 @@ class RealEnv:
             discount=None,
             observation=self.get_observation())
 
-    def step(self, action):
-        state_len = int(len(action) / 2)
-        left_action = action[:state_len]
-        right_action = action[state_len:]
-        self.puppet_bot_left.arm.set_joint_positions(left_action[:6], blocking=False)
-        # self.puppet_bot_right.arm.set_joint_positions(right_action[:6], blocking=False)
-        self.set_gripper_pose(left_action[-1], right_action[-1])
-        time.sleep(DT)
-        return dm_env.TimeStep(
-            step_type=dm_env.StepType.MID,
-            reward=self.get_reward(),
-            discount=None,
-            observation=self.get_observation())
-    
-    def step(self, action, move_time_arm, move_time_gripper):
+    def step(self, action, move_time_arm=0, move_time_gripper=0):
         """
         Execute one step in the environment.
         The move time for the arm and gripper can be specified for testing.
@@ -173,12 +159,19 @@ class RealEnv:
         left_action = action[:state_len]
         right_action = action[state_len:]
 
-        move_arms(self.puppet_bot_left, left_action[:6], move_time_arm)
-        #move_arms(self.puppet_bot_right, right_action[:6], move_time_arm)
-        move_grippers(self.puppet_bot_left, left_action[:6], move_time_gripper)
-        #move_grippers(self.puppet_bot_right, right_action[:6], move_time_gripper)
+        if move_time_arm == 0:
+            self.puppet_bot_left.arm.set_joint_positions(left_action[:6], blocking=False)
+        # self.puppet_bot_right.arm.set_joint_positions(right_action[:6], blocking=False)
+        else:
+            move_arms([self.puppet_bot_left], [left_action[:6]], move_time_arm)
+            #move_arms(self.puppet_bot_right, right_action[:6], move_time_arm)
+        if move_time_gripper == 0:
+            self.set_gripper_pose(left_action[-1], right_action[-1])
+        else:
+            move_grippers([self.puppet_bot_left], [left_action[6]], move_time_gripper)
+            #move_grippers(self.puppet_bot_right, right_action[6], move_time_gripper)
 
-        # time.sleep(DT)  # Not needed with move_arms
+        time.sleep(DT)  # Not needed with move_arms
         return dm_env.TimeStep(
             step_type=dm_env.StepType.MID,
             reward=self.get_reward(),
