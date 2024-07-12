@@ -6,7 +6,7 @@ from constants import config
 class AprilTag:
     def __init__(self, tag_size):
         self.at_detector = Detector(
-            families="tag16h5",
+            families=config["furniture"]["tag_family"],
             nthreads=4,
             quad_decimate=1.0,
             # quad_sigma=0.0,
