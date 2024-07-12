@@ -1,11 +1,12 @@
 import cv2
 from dt_apriltags import Detector
+from constants import config
 
 
 class AprilTag:
     def __init__(self, tag_size):
         self.at_detector = Detector(
-            families="tag36h11",
+            families=config["furniture"]["tag_family"],
             nthreads=4,
             quad_decimate=1.0,
             # quad_sigma=0.0,

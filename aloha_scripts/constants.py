@@ -22,8 +22,9 @@ TASK_CONFIGS = {
 config: Dict[str, Any] = {
     "furniture": {
         "detection_hz": 1,  # TODO
+        "tag_family": "tag16h5",
         "base_tags": [0, 1, 2, 3],  # TODO what?
-        "base_tag_size": 0.048,
+        "base_tag_size": 0.047,
         "rel_pose_from_coordinate": {  # TODO
             0: get_mat([-0.03, -0.03, 0], [0, 0, 0]),
             1: get_mat([0.03, -0.03, 0], [0, 0, 0]),
