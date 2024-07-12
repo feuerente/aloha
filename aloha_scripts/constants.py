@@ -21,7 +21,7 @@ TASK_CONFIGS = {
 
 config: Dict[str, Any] = {
     "furniture": {
-        "detection_hz": 1,  # TODO
+        "detection_hz": 30,  # TODO
         "tag_family": "tag16h5",
         "base_tags": [0, 1, 2, 3],  # TODO what?
         "base_tag_size": 0.047,
