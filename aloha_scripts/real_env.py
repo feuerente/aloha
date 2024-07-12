@@ -59,6 +59,7 @@ class RealEnv:
         self.gripper_command = JointSingleCommand(name="gripper")
 
         self.furniture = furniture_factory(furniture)
+        self.last_parts_pose = [0] * self.furniture.num_parts * 7
         # self.image_recorder = self.furniture.start_detection()
         self.furniture.start_detection()
 
@@ -94,6 +95,18 @@ class RealEnv:
     def get_images(self):
         return self.image_recorder.get_images()
 
+    def get_parts_poses(self):
+        """
+        Return the poses of the parts.
+        Handle parts not found by using the last value for that pose.
+        """
+        parts_poses, parts_found = self.furniture.get_parts_poses()
+        for part_idx, part_found in enumerate(parts_found):
+            if not part_found:
+                parts_poses[part_idx * 7: (part_idx + 1) * 7] = self.last_parts_pose[part_idx * 7: (part_idx + 1) * 7]
+            self.last_parts_pose = parts_poses
+            return parts_poses
+
     def set_gripper_pose(self, left_gripper_desired_pos_normalized, right_gripper_desired_pos_normalized):
         left_gripper_desired_joint = PUPPET_GRIPPER_JOINT_UNNORMALIZE_FN(left_gripper_desired_pos_normalized)
         self.gripper_command.cmd = left_gripper_desired_joint
@@ -118,7 +131,7 @@ class RealEnv:
         obs['qvel'] = self.get_qvel()
         obs['effort'] = self.get_effort()
         obs['images'] = self.get_images()
-        obs['parts_poses'], _ = self.furniture.get_parts_poses()
+        obs['parts_poses'] = self.get_parts_poses()
         return obs
 
     def get_reward(self):

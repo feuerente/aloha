@@ -1,17 +1,19 @@
-import os
-import numpy as np
-import cv2
-import h5py
 import argparse
-
-import matplotlib.pyplot as plt
-from constants import DT
+import os
 
 import IPython
+import cv2
+import h5py
+import matplotlib.pyplot as plt
+import numpy as np
+
+from constants import DT
+
 e = IPython.embed
 
 JOINT_NAMES = ["waist", "shoulder", "elbow", "forearm_roll", "wrist_angle", "wrist_rotate"]
 STATE_NAMES = JOINT_NAMES + ["gripper"]
+
 
 def load_hdf5(dataset_dir, dataset_name):
     dataset_path = os.path.join(dataset_dir, dataset_name + '.hdf5')
@@ -24,38 +26,45 @@ def load_hdf5(dataset_dir, dataset_name):
         qpos = root['/observations/qpos'][()]
         qvel = root['/observations/qvel'][()]
         effort = root['/observations/effort'][()]
+        parts_poses = root['/observations/parts_poses'][()]
         action = root['/action'][()]
         image_dict = dict()
         for cam_name in root[f'/observations/images/'].keys():
             image_dict[cam_name] = root[f'/observations/images/{cam_name}'][()]
 
-    return qpos, qvel, effort, action, image_dict
+    return qpos, qvel, effort, action, parts_poses, image_dict
+
 
 def main(args):
     dataset_dir = args['dataset_dir']
     episode_idx = args['episode_idx']
     dataset_name = f'episode_{episode_idx}'
 
-    qpos, qvel, effort, action, image_dict = load_hdf5(dataset_dir, dataset_name)
+    qpos, qvel, effort, action, parts_poses, image_dict = load_hdf5(dataset_dir, dataset_name)
     save_videos(image_dict, DT, video_path=os.path.join(dataset_dir, dataset_name + '_video.mp4'))
     visualize_joints(qpos, action, plot_path=os.path.join(dataset_dir, dataset_name + '_qpos.png'))
     visualize_single(effort, 'effort', plot_path=os.path.join(dataset_dir, dataset_name + '_effort.png'))
+    visualize_parts_poses(parts_poses, 'parts_poses',
+                          plot_path=os.path.join(dataset_dir, dataset_name + '_parts_poses.png'))
     visualize_single(action - qpos, 'tracking_error', plot_path=os.path.join(dataset_dir, dataset_name + '_error.png'))
     # visualize_timestamp(t_list, dataset_path) # TODO addn timestamp back
 
 
 def save_videos(video, dt, video_path=None):
+    if len(video) == 0:
+        print("No video saved: Images not found!")
+        return
     if isinstance(video, list):
         cam_names = list(video[0].keys())
         h, w, _ = video[0][cam_names[0]].shape
         w = w * len(cam_names)
-        fps = int(1/dt)
+        fps = int(1 / dt)
         out = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
         for ts, image_dict in enumerate(video):
             images = []
             for cam_name in cam_names:
                 image = image_dict[cam_name]
-                image = image[:, :, [2, 1, 0]] # swap B and R channel
+                image = image[:, :, [2, 1, 0]]  # swap B and R channel
                 images.append(image)
             images = np.concatenate(images, axis=1)
             out.write(images)
@@ -66,7 +75,7 @@ def save_videos(video, dt, video_path=None):
         all_cam_videos = []
         for cam_name in cam_names:
             all_cam_videos.append(video[cam_name])
-        all_cam_videos = np.concatenate(all_cam_videos, axis=2) # width dimension
+        all_cam_videos = np.concatenate(all_cam_videos, axis=2)  # width dimension
 
         n_frames, h, w, _ = all_cam_videos.shape
         fps = int(1 / dt)
@@ -85,7 +94,7 @@ def visualize_joints(qpos_list, command_list, plot_path=None, ylim=None, label_o
     else:
         label1, label2 = 'State', 'Command'
 
-    qpos = np.array(qpos_list) # ts, dim
+    qpos = np.array(qpos_list)  # ts, dim
     command = np.array(command_list)
     num_ts, num_dim = qpos.shape
     h, w = 2, num_dim
@@ -116,8 +125,9 @@ def visualize_joints(qpos_list, command_list, plot_path=None, ylim=None, label_o
     print(f'Saved qpos plot to: {plot_path}')
     plt.close()
 
+
 def visualize_single(efforts_list, label, plot_path=None, ylim=None, label_overwrite=None):
-    efforts = np.array(efforts_list) # ts, dim
+    efforts = np.array(efforts_list)  # ts, dim
     num_ts, num_dim = efforts.shape
     h, w = 2, num_dim
     num_figs = num_dim
@@ -142,10 +152,36 @@ def visualize_single(efforts_list, label, plot_path=None, ylim=None, label_overw
     plt.close()
 
 
+def visualize_parts_poses(parts_poses_list, label, plot_path=None, ylim=None, label_overwrite=None):
+    parts_poses = np.array(parts_poses_list)  # (ts, dim)
+    num_ts, num_dim = parts_poses.shape
+    h, w = 2, num_dim
+    num_figs = num_dim
+    fig, axs = plt.subplots(num_figs, 1, figsize=(w, h * num_figs))
+
+    # plot joint state
+    dim_names = ["x", "y", "z", "qw", "qx", "qy", "qz"]
+    for dim_idx in range(num_dim):
+        ax = axs[dim_idx]
+        ax.plot(parts_poses[:, dim_idx], label=label)
+        ax.set_title(f'Dim {dim_idx}: {dim_names[dim_idx]}')
+        ax.legend()
+
+    if ylim:
+        for dim_idx in range(num_dim):
+            ax = axs[dim_idx]
+            ax.set_ylim(ylim)
+
+    plt.tight_layout()
+    plt.savefig(plot_path)
+    print(f'Saved parts_poses plot to: {plot_path}')
+    plt.close()
+
+
 def visualize_timestamp(t_list, dataset_path):
     plot_path = dataset_path.replace('.pkl', '_timestamp.png')
     h, w = 4, 10
-    fig, axs = plt.subplots(2, 1, figsize=(w, h*2))
+    fig, axs = plt.subplots(2, 1, figsize=(w, h * 2))
     # process t_list
     t_float = []
     for secs, nsecs in t_list:
@@ -159,7 +195,7 @@ def visualize_timestamp(t_list, dataset_path):
     ax.set_ylabel('time (sec)')
 
     ax = axs[1]
-    ax.plot(np.arange(len(t_float)-1), t_float[:-1] - t_float[1:])
+    ax.plot(np.arange(len(t_float) - 1), t_float[:-1] - t_float[1:])
     ax.set_title(f'dt')
     ax.set_xlabel('timestep')
     ax.set_ylabel('time (sec)')
@@ -168,6 +204,7 @@ def visualize_timestamp(t_list, dataset_path):
     plt.savefig(plot_path)
     print(f'Saved timestamp plot to: {plot_path}')
     plt.close()
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
