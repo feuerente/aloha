@@ -21,11 +21,10 @@ log = logging.getLogger(__name__)
 OmegaConf.register_new_resolver("eval", eval)
 
 CONFIG = "test_trained_agent_in_env_furniture"
-max_timesteps = 1000
-t_obs = 10
-ACTION_HORIZON = 1
-camera_names = []#'cam_low','cam_high']#'cam_left_wrist', 'cam_right_wrist'
-dataset_dir = 'data/task_1/'
+MAX_TIMESTEPS = 1000
+CAMERA_NAMES = []  # 'cam_low','cam_high', 'cam_left_wrist', 'cam_right_wrist'
+DATASET_DIR = 'data/task_1/'
+
 MOVE_TIME_ARM     =  3  # in seconds
 MOVE_TIME_GRIPPER =  0  # in seconds
 
@@ -46,16 +45,22 @@ def main(cfg: DictConfig) -> None:
         random.seed(hydra_config.seed)
 
     # Update config with new values
-    #hydra_config = OmegaConf.merge(hydra_config, cfg.to_change)
+    if cfg.get("config_to_change") is not None:
+        hydra_config = OmegaConf.merge(hydra_config, cfg.to_change)
+
+    # hydra_config['device'] = 'cpu'
+
+    t_obs = cfg.get("t_obs")
+    t_act = cfg.get("t_act")
+
 
     # Setup agent, and workspace
-    hydra_config['device'] = 'cpu'
     agent, workspace = setup_agent_and_workspace(hydra_config)
     #setup constant values
     read_config(hydra_config)
     # Load the weights
     agent.load_pretrained(cfg.weights)
- 
+
     #prepare the real environment
     env = make_real_env(init_node=True, furniture="table_leg", setup_robots=True)
     # Data collection
@@ -67,9 +72,9 @@ def main(cfg: DictConfig) -> None:
     actions = []
     actual_dt_history = []
     observations = [adjust_images(state) for state in copy.deepcopy(timesteps)]#use ts.observation on real_env
-    
-    
-    for t in tqdm(range(max_timesteps)):
+
+
+    for t in tqdm(range(MAX_TIMESTEPS)):
         t0 = time.time() #
         normalize_last_observation(observations[-1])
         standardize_last_obserservation(observations[-1])
@@ -82,7 +87,7 @@ def main(cfg: DictConfig) -> None:
             action = denormalize(action, SCALER_VALUES['action'], symmetric=NORMALIZE_SYMMETRICALLY)
         if STANDARDIZE_ACTION:
             action = destandardize(action, SCALER_VALUES['action'])
-        for i in range(ACTION_HORIZON):
+        for i in range(t_act):
             t1 = time.time() #
             current_pos = env.puppet_bot_left.arm.get_ee_pose()
             destination = mr.FKinSpace(env.puppet_bot_left.arm.robot_des.M, env.puppet_bot_left.arm.robot_des.Slist, action[0:6].detach().numpy())
@@ -122,7 +127,7 @@ def main(cfg: DictConfig) -> None:
         '/action': [],
 
     }
-    for cam_name in camera_names:
+    for cam_name in CAMERA_NAMES:
         data_dict[f'/observations/images/{cam_name}'] = []
 
     # len(action): max_timesteps, len(time_steps): max_timesteps + 1
@@ -134,26 +139,26 @@ def main(cfg: DictConfig) -> None:
         data_dict['/observations/effort'].append(ts['effort'])
         data_dict['/observations/parts_poses'].append(ts['parts_poses'])
         data_dict['/action'].append(action)
-        for cam_name in camera_names:
+        for cam_name in CAMERA_NAMES:
             data_dict[f'/observations/images/{cam_name}'].append(ts['images'][cam_name])
 
     # HDF5
     t0 = time.time()
-    index = get_auto_index(dataset_dir)
-    dataset_path = dataset_dir+ f'episode_{index}'
+    index = get_auto_index(DATASET_DIR)
+    dataset_path = DATASET_DIR + f'episode_{index}'
     with h5py.File(dataset_path +'.hdf5', 'w', rdcc_nbytes=1024**2*2) as root:
         root.attrs['sim'] = False
         obs = root.create_group('observations')
         image = obs.create_group('images')
-        for cam_name in camera_names:
-            _ = image.create_dataset(cam_name, (max_timesteps, 480, 640, 3), dtype='uint8',
+        for cam_name in CAMERA_NAMES:
+            _ = image.create_dataset(cam_name, (MAX_TIMESTEPS, 480, 640, 3), dtype='uint8',
                                      chunks=(1, 480, 640, 3), )
         number_joints = 14
-        _ = obs.create_dataset('qpos', (max_timesteps, number_joints))
-        _ = obs.create_dataset('qvel', (max_timesteps, number_joints))
-        _ = obs.create_dataset('effort', (max_timesteps, number_joints))
-        _ = obs.create_dataset('parts_poses', (max_timesteps, 7))
-        _ = root.create_dataset('action', (max_timesteps, number_joints))
+        _ = obs.create_dataset('qpos', (MAX_TIMESTEPS, number_joints))
+        _ = obs.create_dataset('qvel', (MAX_TIMESTEPS, number_joints))
+        _ = obs.create_dataset('effort', (MAX_TIMESTEPS, number_joints))
+        _ = obs.create_dataset('parts_poses', (MAX_TIMESTEPS, 7))
+        _ = root.create_dataset('action', (MAX_TIMESTEPS, number_joints))
 
         for name, array in data_dict.items():
             root[name][...] = array
