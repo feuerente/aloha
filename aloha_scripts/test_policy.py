@@ -44,13 +44,13 @@ def main(cfg: DictConfig) -> None:
         random.seed(hydra_config.seed)
 
     # Update config with new values
-    if cfg.get("config_to_change") is not None:
+    if cfg.get("to_change") is not None:
         hydra_config = OmegaConf.merge(hydra_config, cfg.to_change)
 
     # hydra_config['device'] = 'cpu'
 
-    t_obs = cfg.get("t_obs")
-    t_act = cfg.get("t_act")
+    t_obs = hydra_config.get("t_obs")
+    t_act = hydra_config.get("t_act")
 
     # Setup agent, and workspace
     agent, workspace = setup_agent_and_workspace(hydra_config)
@@ -78,17 +78,23 @@ def main(cfg: DictConfig) -> None:
         last_obs = last_observations(observations[-t_obs:])
         last_obs.pop('effort', None)
         # TODO image_transforms
+        last_obs = {k: v.to(device=torch.device('cuda'), non_blocking=True) for k, v in last_obs.items()}
         action = torch.squeeze(agent.predict(observation=last_obs, extra_inputs=dict()))
+        action = action.to(torch.device('cpu'))
         # unnormalize and unstandardize the action if necessary
         if NORMALIZE_ACTION:
             action = denormalize(action, SCALER_VALUES['action'], symmetric=NORMALIZE_SYMMETRICALLY)
         if STANDARDIZE_ACTION:
             action = destandardize(action, SCALER_VALUES['action'])
+
+        if len(action.size()) == 1:
+            action = action[None, :]
+
         for i in range(t_act):
             t1 = time.time()  #
             current_pos = env.puppet_bot_left.arm.get_ee_pose()
             destination = mr.FKinSpace(env.puppet_bot_left.arm.robot_des.M, env.puppet_bot_left.arm.robot_des.Slist,
-                                       action[0:6].detach().numpy())
+                                       action[i, 0:6].detach().numpy())
             print(destination)
             # compare the current position with the destination such that we don t make to big steps
             # according to stackoverflow this gives us the offset between the two matrices
@@ -109,10 +115,10 @@ def main(cfg: DictConfig) -> None:
             #         #wait for the user to press enter
             #         if input("Press enter to continue") == "":
             #             break
-            ts = env.step(action, move_time_arm=MOVE_TIME_ARM, move_time_gripper=MOVE_TIME_GRIPPER)
+            ts = env.step(action[i], move_time_arm=MOVE_TIME_ARM, move_time_gripper=MOVE_TIME_GRIPPER)
             t2 = time.time()  #
             timesteps.append(ts)
-            actions.append(action)
+            actions.append(action[i])
             observations.append(adjust_images(copy.deepcopy(ts.observation)))
             actual_dt_history.append([t0, t1, t2])
 
