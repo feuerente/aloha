@@ -51,6 +51,7 @@ def main(cfg: DictConfig) -> None:
 
     t_obs = cfg.get("t_obs")
     t_act = cfg.get("t_act")
+    parts_poses_euler = "parts_poses_euler" in hydra_config.dataset_config and hydra_config.dataset_config.parts_poses_euler
 
     # Setup agent, and workspace
     agent, workspace = setup_agent_and_workspace(hydra_config)
@@ -69,7 +70,7 @@ def main(cfg: DictConfig) -> None:
         timesteps.append(ts)
     actions = []
     actual_dt_history = []
-    observations = [adjust_images(state) for state in copy.deepcopy(timesteps)]  # use ts.observation on real_env
+    observations = [adjust_parts_poses(adjust_images(state), parts_poses_euler) for state in copy.deepcopy(timesteps)]  # use ts.observation on real_env
 
     for t in tqdm(range(MAX_TIMESTEPS)):
         t0 = time.time()  #
@@ -113,7 +114,7 @@ def main(cfg: DictConfig) -> None:
             t2 = time.time()  #
             timesteps.append(ts)
             actions.append(action)
-            observations.append(adjust_images(copy.deepcopy(ts.observation)))
+            observations.append(adjust_parts_poses(adjust_images(copy.deepcopy(ts.observation)), parts_poses_euler))
             actual_dt_history.append([t0, t1, t2])
 
     # save the data
@@ -155,7 +156,7 @@ def main(cfg: DictConfig) -> None:
         _ = obs.create_dataset('qpos', (MAX_TIMESTEPS, number_joints))
         _ = obs.create_dataset('qvel', (MAX_TIMESTEPS, number_joints))
         _ = obs.create_dataset('effort', (MAX_TIMESTEPS, number_joints))
-        _ = obs.create_dataset('parts_poses', (MAX_TIMESTEPS, 7))
+        _ = obs.create_dataset('parts_poses', (MAX_TIMESTEPS, 6 if parts_poses_euler else 7))
         _ = root.create_dataset('action', (MAX_TIMESTEPS, number_joints))
 
         for name, array in data_dict.items():
@@ -191,6 +192,18 @@ def adjust_images(observation):
         observation[key] = torch.tensor(value, dtype=torch.float32)[...]
     # for cam_name in IMAGE_KEYS:
     #     observation['images'][cam_name] = observation['images'][cam_name].type(torch.FloatTensor)
+    return observation
+
+
+def adjust_parts_poses(observation, parts_poses_euler):
+    if "parts_poses" in observation and parts_poses_euler:
+        parts_poses = observation['parts_poses']
+        out_parts_poses = []
+        for part_pose in parts_poses.reshape(-1, 7):
+            quaternion = part_pose[3:7]
+            euler_angle = R.from_quat(quaternion).as_euler('xyz', degrees=False)
+            out_parts_poses.append(np.concatenate((part_pose[:3], euler_angle)))
+        observation['parts_poses'] = np.hstack(out_parts_poses)
     return observation
 
 

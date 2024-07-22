@@ -101,11 +101,14 @@ class RealEnv:
         Handle parts not found by using the last value for that pose.
         """
         parts_poses, parts_found = self.furniture.get_parts_poses()
+        return self.handle_missing_parts_poses(parts_poses, parts_found)
+
+    def handle_missing_parts_poses(self, parts_poses, parts_found):
         for part_idx, part_found in enumerate(parts_found):
             if not part_found:
                 parts_poses[part_idx * 7: (part_idx + 1) * 7] = self.last_parts_pose[part_idx * 7: (part_idx + 1) * 7]
             self.last_parts_pose = parts_poses
-            return parts_poses
+        return parts_poses
 
     def set_gripper_pose(self, left_gripper_desired_pos_normalized, right_gripper_desired_pos_normalized):
         left_gripper_desired_joint = PUPPET_GRIPPER_JOINT_UNNORMALIZE_FN(left_gripper_desired_pos_normalized)
