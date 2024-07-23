@@ -27,6 +27,7 @@ DATASET_DIR = 'data/task_1/'
 
 MOVE_TIME_ARM = 3  # in seconds
 MOVE_TIME_GRIPPER = 0  # in seconds
+HALVED_POLICY = True
 
 
 @hydra.main(version_base=None, config_path="/home/studentgroup1/trajectory-diffusion-prak/conf", config_name=CONFIG)
@@ -77,6 +78,9 @@ def main(cfg: DictConfig) -> None:
         standardize_last_obserservation(observations[-1])
         last_obs = last_observations(observations[-t_obs:])
         last_obs.pop('effort', None)
+
+        if HALVED_POLICY:
+            last_obs = {key: value[:, :value.shape[1] // 2] for key, value in last_obs.items()}
         # TODO image_transforms
         action = torch.squeeze(agent.predict(observation=last_obs, extra_inputs=dict()))
         # unnormalize and unstandardize the action if necessary
@@ -84,16 +88,16 @@ def main(cfg: DictConfig) -> None:
             action = denormalize(action, SCALER_VALUES['action'], symmetric=NORMALIZE_SYMMETRICALLY)
         if STANDARDIZE_ACTION:
             action = destandardize(action, SCALER_VALUES['action'])
+         #need to make the action shape for 2 robots, simply copy the action for the second robot even tho it wont be used
+        if HALVED_POLICY:
+            action = torch.cat([action, action], dim=1)
         for i in range(t_act):
             t1 = time.time()  #
             current_pos = env.puppet_bot_left.arm.get_ee_pose()
             destination = mr.FKinSpace(env.puppet_bot_left.arm.robot_des.M, env.puppet_bot_left.arm.robot_des.Slist,
                                        action[0:6].detach().numpy())
-            print(destination)
-            # compare the current position with the destination such that we don t make to big steps
-            # according to stackoverflow this gives us the offset between the two matrices
-            # we could also just calculate the distance between the translation vectors of the transformation matrix
-            offset = np.linalg.inv(current_pos) * destination
+            print(destination[0:3,3])
+            print(current_pos[0:3,3])
             # We will have to findout what proper distances are
             # check the translation vector
             if destination[2, 3] < 0.05:
@@ -103,12 +107,6 @@ def main(cfg: DictConfig) -> None:
                     if input("Press enter to continue") == "":
                         break
 
-                        # if np.linalg.norm(offset[0:3,3]) > 0.01:
-            #     print("Warning: The offset is too big!")
-            #     while(True):
-            #         #wait for the user to press enter
-            #         if input("Press enter to continue") == "":
-            #             break
             ts = env.step(action, move_time_arm=MOVE_TIME_ARM, move_time_gripper=MOVE_TIME_GRIPPER)
             t2 = time.time()  #
             timesteps.append(ts)
