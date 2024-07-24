@@ -52,6 +52,7 @@ def main(cfg: DictConfig) -> None:
 
     t_obs = cfg.get("t_obs")
     t_act = cfg.get("t_act")
+    relative_action = cfg.get("agent_config/value/process_batch_config/relative_action_values")
 
     # Setup agent, and workspace
     agent, workspace = setup_agent_and_workspace(hydra_config)
@@ -94,6 +95,9 @@ def main(cfg: DictConfig) -> None:
         for i in range(t_act):
             t1 = time.time()  #
             current_pos = env.puppet_bot_left.arm.get_ee_pose()
+            #add current joint states to the actions
+            if relative_action:
+                action = env.puppet_bot_left.arm.joint_states.position[:] + action 
             destination = mr.FKinSpace(env.puppet_bot_left.arm.robot_des.M, env.puppet_bot_left.arm.robot_des.Slist,
                                        action[0:6].detach().numpy())
             print(destination[0:3,3])
