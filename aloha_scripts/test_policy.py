@@ -25,7 +25,7 @@ MAX_TIMESTEPS = 1000
 CAMERA_NAMES = []  # 'cam_low','cam_high', 'cam_left_wrist', 'cam_right_wrist'
 DATASET_DIR = 'data/task_1/'
 
-MOVE_TIME_ARM = 3  # in seconds
+MOVE_TIME_ARM = 0 #.1  # in seconds
 MOVE_TIME_GRIPPER = 0  # in seconds
 HALVED_POLICY = True
 
@@ -97,28 +97,30 @@ def main(cfg: DictConfig) -> None:
         if STANDARDIZE_ACTION:
             action = destandardize(action, SCALER_VALUES['action'])
          #need to make the action shape for 2 robots, simply copy the action for the second robot even tho it wont be used
-        if HALVED_POLICY:
-            action = torch.cat([action, action], dim=1)
+        last_qpos = last_obs['qpos'].to(torch.device('cpu'))[-1,-1,:]#torch.tensor(env.puppet_bot_left.arm.get_joint_commands())#
         if len(action.size()) == 1:
             action = action[None,:]
+        if HALVED_POLICY:
+            action = torch.cat([action, action], dim=1)
+            last_qpos = torch.cat([last_qpos,last_qpos])
         for i in range(t_act):
             t1 = time.time()  #
             current_pos = env.puppet_bot_left.arm.get_ee_pose()
             #add current joint states to the actions
             if relative_action:
-                action[i] = env.puppet_bot_left.arm.joint_states.position[:] + action[i]
+                action[i] -= last_qpos
             destination = mr.FKinSpace(env.puppet_bot_left.arm.robot_des.M, env.puppet_bot_left.arm.robot_des.Slist,
                                        action[i][0:6].detach().numpy())
             print(destination[0:3,3])
             print(current_pos[0:3,3])
             # We will have to findout what proper distances are
             # check the translation vector
-            if destination[2, 3] < 0.05:
-                print("Warning: Height will be to low")
-                while (True):
-                    # wait for the user to press enter
-                    if input("Press enter to continue") == "":
-                        break
+            # if destination[2, 3] < 0.05:
+            #     print("Warning: Height will be to low")
+            #     while (True):
+            #         # wait for the user to press enter
+            #         if input("Press enter to continue") == "":
+            #             break
 
             ts = env.step(action[i], move_time_arm=MOVE_TIME_ARM, move_time_gripper=MOVE_TIME_GRIPPER).observation
             if HALVED_POLICY:
