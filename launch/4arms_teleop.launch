@@ -97,7 +97,8 @@
     <param name="io_method" value="mmap"/>
     <param name="autofocus" value="false"/>
     <param name="focus" value="5"/>
-    <param name="autoexposure" value="true"/>
+    <param name="autoexposure" value="False"/>
+    <param name="exposure" value="200"/> 
   </node>
 
   <node name="usb_cam_low" pkg="usb_cam" type="usb_cam_node" output="screen" >
@@ -110,7 +111,8 @@
     <param name="io_method" value="mmap"/>
     <param name="autofocus" value="false"/>
     <param name="focus" value="35"/>
-    <param name="autoexposure" value="true"/>
+    <param name="autoexposure" value="False"/>
+    <param name="exposure" value="200"/>
   </node>
 
   <!-- <node name="usb_cam_left_wrist" pkg="usb_cam" type="usb_cam_node" output="screen" >

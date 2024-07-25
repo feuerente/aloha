@@ -66,15 +66,21 @@ def main(cfg: DictConfig) -> None:
     timesteps = [ts.observation]
     for i in range(t_obs - 1):
         ts = env.get_observation()
+        normalize_last_observation(ts)
+        standardize_last_observation(ts)
         timesteps.append(ts)
+        
     actions = []
     actual_dt_history = []
     observations = [adjust_images(state) for state in copy.deepcopy(timesteps)]  # use ts.observation on real_env
+    # for i in range(t_obs-1):
+    #     normalize_last_observation(observations[i])
+    #     standardize_last_observation(observations[i])
 
     for t in tqdm(range(MAX_TIMESTEPS)):
         t0 = time.time()  #
-        normalize_last_observation(observations[-1])
-        standardize_last_obserservation(observations[-1])
+        # normalize_last_observation(observations[-1])
+        # standardize_last_observation(observations[-1])
         last_obs = last_observations(observations[-t_obs:])
         last_obs.pop('effort', None)
         # TODO image_transforms
@@ -116,7 +122,9 @@ def main(cfg: DictConfig) -> None:
             #         if input("Press enter to continue") == "":
             #             break
             ts = env.step(action[i], move_time_arm=MOVE_TIME_ARM, move_time_gripper=MOVE_TIME_GRIPPER)
-            t2 = time.time()  #
+            t2 = time.time()  
+            normalize_last_observation(ts)
+            standardize_last_observation(ts)
             timesteps.append(ts)
             actions.append(action[i])
             observations.append(adjust_images(copy.deepcopy(ts.observation)))
@@ -175,7 +183,7 @@ def normalize_last_observation(observations):
         observations[key] = normalize(observations[key], SCALER_VALUES[key], symmetric=NORMALIZE_SYMMETRICALLY)
 
 
-def standardize_last_obserservation(observations):
+def standardize_last_observation(observations):
     for key in STANDARDIZE_KEYS:
         # Standardize all trajectories
         observations[key] = standardize(observations[key], torch.tensor(SCALER_VALUES[key]))
