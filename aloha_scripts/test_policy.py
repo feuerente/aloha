@@ -45,19 +45,14 @@ def main(cfg: DictConfig) -> None:
         random.seed(hydra_config.seed)
 
     # Update config with new values
-    if cfg.get("to_change") is not None:
+    if cfg.get("config_to_change") is not None:
         hydra_config = OmegaConf.merge(hydra_config, cfg.to_change)
 
     # hydra_config['device'] = 'cpu'
 
-<<<<<<< HEAD
-    t_obs = cfg.get("t_obs")
-    t_act = cfg.get("t_act")
-    relative_action = cfg.get("agent_config/value/process_batch_config/relative_action_values")
-=======
     t_obs = hydra_config.get("t_obs")
     t_act = hydra_config.get("t_act")
->>>>>>> policy-rollout
+    relative_action = hydra_config.get("agent_config/value/process_batch_config/relative_action_values")
 
     # Setup agent, and workspace
     agent, workspace = setup_agent_and_workspace(hydra_config)
@@ -73,28 +68,27 @@ def main(cfg: DictConfig) -> None:
     timesteps = [ts.observation]
     for i in range(t_obs - 1):
         ts = env.get_observation()
-        normalize_last_observation(ts)
-        standardize_last_observation(ts)
         timesteps.append(ts)
-        
+    for ts in timesteps:
+        if HALVED_POLICY:
+            for key, value in ts.items():
+                if key != 'images' and key != 'parts_poses':
+                    ts[key] = value[:value.shape[0] // 2]
+                #TODO Images
+            #ts = {key: value[:value.shape[0] // 2] for key, value in ts.items()}
+        normalize_last_observation(ts)
+        standardize_last_obserservation(ts)
     actions = []
     actual_dt_history = []
     observations = [adjust_images(state) for state in copy.deepcopy(timesteps)]  # use ts.observation on real_env
-    # for i in range(t_obs-1):
-    #     normalize_last_observation(observations[i])
-    #     standardize_last_observation(observations[i])
 
     for t in tqdm(range(MAX_TIMESTEPS)):
         t0 = time.time()  #
-        # normalize_last_observation(observations[-1])
-        # standardize_last_observation(observations[-1])
         last_obs = last_observations(observations[-t_obs:])
         last_obs.pop('effort', None)
-
-        if HALVED_POLICY:
-            last_obs = {key: value[:, :value.shape[1] // 2] for key, value in last_obs.items()}
+        last_obs = {key: value.to(torch.device('cuda')) for key, value in last_obs.items()}
+        
         # TODO image_transforms
-        last_obs = {k: v.to(device=torch.device('cuda'), non_blocking=True) for k, v in last_obs.items()}
         action = torch.squeeze(agent.predict(observation=last_obs, extra_inputs=dict()))
         action = action.to(torch.device('cpu'))
         # unnormalize and unstandardize the action if necessary
@@ -102,35 +96,21 @@ def main(cfg: DictConfig) -> None:
             action = denormalize(action, SCALER_VALUES['action'], symmetric=NORMALIZE_SYMMETRICALLY)
         if STANDARDIZE_ACTION:
             action = destandardize(action, SCALER_VALUES['action'])
-<<<<<<< HEAD
          #need to make the action shape for 2 robots, simply copy the action for the second robot even tho it wont be used
         if HALVED_POLICY:
             action = torch.cat([action, action], dim=1)
-=======
-
         if len(action.size()) == 1:
-            action = action[None, :]
-
->>>>>>> policy-rollout
+            action = action[None,:]
         for i in range(t_act):
             t1 = time.time()  #
             current_pos = env.puppet_bot_left.arm.get_ee_pose()
             #add current joint states to the actions
             if relative_action:
-                action = env.puppet_bot_left.arm.joint_states.position[:] + action 
+                action[i] = env.puppet_bot_left.arm.joint_states.position[:] + action[i]
             destination = mr.FKinSpace(env.puppet_bot_left.arm.robot_des.M, env.puppet_bot_left.arm.robot_des.Slist,
-<<<<<<< HEAD
-                                       action[0:6].detach().numpy())
+                                       action[i][0:6].detach().numpy())
             print(destination[0:3,3])
             print(current_pos[0:3,3])
-=======
-                                       action[i, 0:6].detach().numpy())
-            print(destination)
-            # compare the current position with the destination such that we don t make to big steps
-            # according to stackoverflow this gives us the offset between the two matrices
-            # we could also just calculate the distance between the translation vectors of the transformation matrix
-            offset = np.linalg.inv(current_pos) * destination
->>>>>>> policy-rollout
             # We will have to findout what proper distances are
             # check the translation vector
             if destination[2, 3] < 0.05:
@@ -140,24 +120,17 @@ def main(cfg: DictConfig) -> None:
                     if input("Press enter to continue") == "":
                         break
 
-<<<<<<< HEAD
-            ts = env.step(action, move_time_arm=MOVE_TIME_ARM, move_time_gripper=MOVE_TIME_GRIPPER)
-            t2 = time.time()  #
-=======
-                        # if np.linalg.norm(offset[0:3,3]) > 0.01:
-            #     print("Warning: The offset is too big!")
-            #     while(True):
-            #         #wait for the user to press enter
-            #         if input("Press enter to continue") == "":
-            #             break
-            ts = env.step(action[i], move_time_arm=MOVE_TIME_ARM, move_time_gripper=MOVE_TIME_GRIPPER)
-            t2 = time.time()  
+            ts = env.step(action[i], move_time_arm=MOVE_TIME_ARM, move_time_gripper=MOVE_TIME_GRIPPER).observation
+            if HALVED_POLICY:
+                for key, value in ts.items():
+                    if key != 'images' and key != 'parts_poses':
+                        ts[key] = value[:value.shape[0] // 2]
             normalize_last_observation(ts)
-            standardize_last_observation(ts)
->>>>>>> policy-rollout
+            standardize_last_obserservation(ts)
+            t2 = time.time()  #
             timesteps.append(ts)
             actions.append(action[i])
-            observations.append(adjust_images(copy.deepcopy(ts.observation)))
+            observations.append(adjust_images(copy.deepcopy(ts)))
             actual_dt_history.append([t0, t1, t2])
 
     # save the data
@@ -210,13 +183,13 @@ def main(cfg: DictConfig) -> None:
 def normalize_last_observation(observations):
     for key in NORMALIZE_KEYS:
         # Normalize all trajectories
-        observations[key] = normalize(observations[key], SCALER_VALUES[key], symmetric=NORMALIZE_SYMMETRICALLY)
+        observations[key] = normalize(torch.tensor(observations[key]), SCALER_VALUES[key], symmetric=NORMALIZE_SYMMETRICALLY)
 
 
-def standardize_last_observation(observations):
+def standardize_last_obserservation(observations):
     for key in STANDARDIZE_KEYS:
         # Standardize all trajectories
-        observations[key] = standardize(observations[key], torch.tensor(SCALER_VALUES[key]))
+        observations[key] = standardize(torch.tensor(observations[key]), torch.tensor(SCALER_VALUES[key]))
 
 
 def adjust_images(observation):
