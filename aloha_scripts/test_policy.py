@@ -52,7 +52,7 @@ def main(cfg: DictConfig) -> None:
 
     t_obs = hydra_config.get("t_obs")
     t_act = hydra_config.get("t_act")
-    relative_action = hydra_config.get("agent_config/value/process_batch_config/relative_action_values")
+    relative_action = "relative_action_values" in hydra_config.agent_config.process_batch_config and hydra_config.agent_config.process_batch_config.relative_action_values
 
     # Setup agent, and workspace
     agent, workspace = setup_agent_and_workspace(hydra_config)
