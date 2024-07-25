@@ -60,6 +60,7 @@ class RealEnv:
 
         self.furniture = furniture_factory(furniture)
         self.last_found_parts_poses = [0] * self.furniture.num_parts * 7
+        self.last_parts_poses = None
         # self.image_recorder = self.furniture.start_detection()
         self.furniture.start_detection()
 
@@ -117,19 +118,24 @@ class RealEnv:
         max_y_movement = 0.03
         max_z_movement = 0.03
 
+        if self.last_parts_poses is None:
+            self.last_parts_poses = parts_poses
+            return parts_poses
+
         for part_idx in range(len(parts_poses) // 7):
             part_pose = parts_poses.reshape(-1, 7)[part_idx]
-            last_found_part_pose = self.last_found_parts_poses.reshape(-1, 7)[part_idx]
+            last_part_pose = self.last_parts_poses.reshape(-1, 7)[part_idx]
 
             # Detect outliers by max x,y,z movement between steps
-            x_diff = abs(part_pose[0] - last_found_part_pose[0])
-            y_diff = abs(part_pose[1] - last_found_part_pose[1])
-            z_diff = abs(part_pose[2] - last_found_part_pose[2])
+            x_diff = abs(part_pose[0] - last_part_pose[0])
+            y_diff = abs(part_pose[1] - last_part_pose[1])
+            z_diff = abs(part_pose[2] - last_part_pose[2])
 
             if x_diff > max_x_movement or y_diff > max_y_movement or z_diff > max_z_movement:
                 print(f"INFO: parts_poses outlier detected and compensated!")
                 # Replace detected outlier with last found part pose
-                parts_poses[part_idx * 7: (part_idx + 1) * 7] = last_found_part_pose
+                parts_poses[part_idx * 7: (part_idx + 1) * 7] = last_part_pose
+            self.last_parts_poses = parts_poses
         return parts_poses
 
     def set_gripper_pose(self, left_gripper_desired_pos_normalized, right_gripper_desired_pos_normalized):
