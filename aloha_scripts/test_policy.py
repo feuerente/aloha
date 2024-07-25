@@ -156,7 +156,7 @@ def main(cfg: DictConfig) -> None:
         _ = obs.create_dataset('qpos', (MAX_TIMESTEPS, number_joints))
         _ = obs.create_dataset('qvel', (MAX_TIMESTEPS, number_joints))
         _ = obs.create_dataset('effort', (MAX_TIMESTEPS, number_joints))
-        _ = obs.create_dataset('parts_poses', (MAX_TIMESTEPS, 6 if parts_poses_euler else 7))
+        _ = obs.create_dataset('parts_poses', (MAX_TIMESTEPS, 7))
         _ = root.create_dataset('action', (MAX_TIMESTEPS, number_joints))
 
         for name, array in data_dict.items():
