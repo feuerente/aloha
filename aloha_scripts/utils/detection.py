@@ -87,7 +87,7 @@ def _get_parts_poses(
     # Debug pose
     # print(f"tags_low:  {tags_low}")
     # print(f"tags_high: {tags_high}")
-    print(f"tags_low:  {[tag for tag in tags_low]}")
+    # print(f"tags_low:  {[tag for tag in tags_low]}")
     # print(f"tags_high: {[tag for tag in tags_high]}")
 
     for part in parts:

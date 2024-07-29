@@ -8,12 +8,13 @@ import numpy as np
 from interbotix_xs_modules.arm import InterbotixManipulatorXS
 from interbotix_xs_msgs.msg import JointSingleCommand
 
-from furniture import furniture_factory
 from constants import DT, START_ARM_POSE, MASTER_GRIPPER_JOINT_NORMALIZE_FN, PUPPET_GRIPPER_JOINT_UNNORMALIZE_FN
 from constants import PUPPET_GRIPPER_JOINT_OPEN, PUPPET_GRIPPER_JOINT_CLOSE
 from constants import PUPPET_GRIPPER_POSITION_NORMALIZE_FN, PUPPET_GRIPPER_VELOCITY_NORMALIZE_FN
+from furniture import furniture_factory
 from robot_utils import Recorder, ImageRecorder
 from robot_utils import setup_master_bot, setup_puppet_bot, move_arms, move_grippers
+from utils.frequency import set_frequency
 
 e = IPython.embed
 
@@ -181,6 +182,7 @@ class RealEnv:
             discount=None,
             observation=self.get_observation())
 
+    @set_frequency(1/DT)
     def step(self, action, move_time_arm=0, move_time_gripper=0):
         """
         Execute one step in the environment.
@@ -202,7 +204,7 @@ class RealEnv:
             move_grippers([self.puppet_bot_left], [left_action[6]], move_time_gripper)
             #move_grippers(self.puppet_bot_right, right_action[6], move_time_gripper)
 
-        time.sleep(DT)  # Not needed with move_arms
+        # time.sleep(DT)  # Not needed with move_arms
         return dm_env.TimeStep(
             step_type=dm_env.StepType.MID,
             reward=self.get_reward(),

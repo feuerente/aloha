@@ -7,6 +7,7 @@ from omegaconf import DictConfig, OmegaConf
 import numpy as np
 import random
 import copy
+import cProfile
 
 from trajectory_diffusion.utils.setup_helper import setup_agent_and_workspace, parse_wandb_to_hydra_config
 from real_env import make_real_env
@@ -21,11 +22,11 @@ log = logging.getLogger(__name__)
 OmegaConf.register_new_resolver("eval", eval)
 
 CONFIG = "test_trained_agent_in_env_furniture"
-MAX_TIMESTEPS = 1000
+MAX_TIMESTEPS = 10000  # FIX: doesn't account for multiple actions per prediction
 CAMERA_NAMES = []  # 'cam_low','cam_high', 'cam_left_wrist', 'cam_right_wrist'
 DATASET_DIR = 'data/task_1/'
 
-MOVE_TIME_ARM = 0 #.1  # in seconds
+MOVE_TIME_ARM = 1 #.1  # in seconds
 MOVE_TIME_GRIPPER = 0  # in seconds
 HALVED_POLICY = True
 
@@ -61,6 +62,8 @@ def main(cfg: DictConfig) -> None:
     read_config(hydra_config)
     # Load the weights
     agent.load_pretrained(cfg.weights)
+    # TODO checkout
+    agent.use_ema_weights()
 
     # prepare the real environment
     env = make_real_env(init_node=True, furniture="table_leg", setup_robots=True)
@@ -83,6 +86,8 @@ def main(cfg: DictConfig) -> None:
     actual_dt_history = []
     observations = [adjust_parts_poses(adjust_images(state), parts_poses_euler) for state in copy.deepcopy(timesteps)]  # use ts.observation on real_env
 
+    # profiler = cProfile.Profile()
+    # profiler.enable()
     for t in tqdm(range(MAX_TIMESTEPS)):
         t0 = time.time()  #
         last_obs = last_observations(observations[-t_obs:])
@@ -106,14 +111,14 @@ def main(cfg: DictConfig) -> None:
             last_qpos = torch.cat([last_qpos,last_qpos])
         for i in range(t_act):
             t1 = time.time()  #
-            current_pos = env.puppet_bot_left.arm.get_ee_pose()
+            # current_pos = env.puppet_bot_left.arm.get_ee_pose()
             #add current joint states to the actions
             if relative_action:
                 action[i] -= last_qpos
-            destination = mr.FKinSpace(env.puppet_bot_left.arm.robot_des.M, env.puppet_bot_left.arm.robot_des.Slist,
-                                       action[i][0:6].detach().numpy())
-            print(destination[0:3,3])
-            print(current_pos[0:3,3])
+            # destination = mr.FKinSpace(env.puppet_bot_left.arm.robot_des.M, env.puppet_bot_left.arm.robot_des.Slist,
+            #                            action[i][0:6].detach().numpy())
+            # print(destination[0:3,3])
+            # print(current_pos[0:3,3])
             # We will have to findout what proper distances are
             # check the translation vector
             # if destination[2, 3] < 0.05:
@@ -135,52 +140,58 @@ def main(cfg: DictConfig) -> None:
             actions.append(action[i])
             observations.append(adjust_parts_poses(adjust_images(copy.deepcopy(ts)), parts_poses_euler))
             actual_dt_history.append([t0, t1, t2])
+    
+    # profiler.disable()
+    # profiler.dump_stats("./profiling/test_policy_loop.prof")
 
-    # save the data
-    data_dict = {
-        '/observations/qpos': [],
-        '/observations/qvel': [],
-        '/observations/effort': [],
-        '/observations/parts_poses': [],
-        '/action': [],
+    # TODO checkout
+    agent.restore_model_weights()
 
-    }
-    for cam_name in CAMERA_NAMES:
-        data_dict[f'/observations/images/{cam_name}'] = []
+    # # save the data
+    # data_dict = {
+    #     '/observations/qpos': [],
+    #     '/observations/qvel': [],
+    #     '/observations/effort': [],
+    #     '/observations/parts_poses': [],
+    #     '/action': [],
 
-    # len(action): max_timesteps, len(time_steps): max_timesteps + 1
-    while actions:
-        action = actions.pop(0)
-        ts = timesteps.pop(0)
-        data_dict['/observations/qpos'].append(ts['qpos'])
-        data_dict['/observations/qvel'].append(ts['qvel'])
-        data_dict['/observations/effort'].append(ts['effort'])
-        data_dict['/observations/parts_poses'].append(ts['parts_poses'])
-        data_dict['/action'].append(action)
-        for cam_name in CAMERA_NAMES:
-            data_dict[f'/observations/images/{cam_name}'].append(ts['images'][cam_name])
+    # }
+    # for cam_name in CAMERA_NAMES:
+    #     data_dict[f'/observations/images/{cam_name}'] = []
 
-    # HDF5
-    t0 = time.time()
-    index = get_auto_index(DATASET_DIR)
-    dataset_path = DATASET_DIR + f'episode_{index}'
-    with h5py.File(dataset_path + '.hdf5', 'w', rdcc_nbytes=1024 ** 2 * 2) as root:
-        root.attrs['sim'] = False
-        obs = root.create_group('observations')
-        image = obs.create_group('images')
-        for cam_name in CAMERA_NAMES:
-            _ = image.create_dataset(cam_name, (MAX_TIMESTEPS, 480, 640, 3), dtype='uint8',
-                                     chunks=(1, 480, 640, 3), )
-        number_joints = 14
-        _ = obs.create_dataset('qpos', (MAX_TIMESTEPS, number_joints))
-        _ = obs.create_dataset('qvel', (MAX_TIMESTEPS, number_joints))
-        _ = obs.create_dataset('effort', (MAX_TIMESTEPS, number_joints))
-        _ = obs.create_dataset('parts_poses', (MAX_TIMESTEPS, 7))
-        _ = root.create_dataset('action', (MAX_TIMESTEPS, number_joints))
+    # # len(action): max_timesteps, len(time_steps): max_timesteps + 1
+    # while actions:
+    #     action = actions.pop(0)
+    #     ts = timesteps.pop(0)
+    #     data_dict['/observations/qpos'].append(ts['qpos'])
+    #     data_dict['/observations/qvel'].append(ts['qvel'])
+    #     data_dict['/observations/effort'].append(ts['effort'])
+    #     data_dict['/observations/parts_poses'].append(ts['parts_poses'])
+    #     data_dict['/action'].append(action)
+    #     for cam_name in CAMERA_NAMES:
+    #         data_dict[f'/observations/images/{cam_name}'].append(ts['images'][cam_name])
 
-        for name, array in data_dict.items():
-            root[name][...] = array
-    print(f'Saving: {time.time() - t0:.1f} secs')
+    # # HDF5
+    # t0 = time.time()
+    # index = get_auto_index(DATASET_DIR)
+    # dataset_path = DATASET_DIR + f'episode_{index}'
+    # with h5py.File(dataset_path + '.hdf5', 'w', rdcc_nbytes=1024 ** 2 * 2) as root:
+    #     root.attrs['sim'] = False
+    #     obs = root.create_group('observations')
+    #     image = obs.create_group('images')
+    #     for cam_name in CAMERA_NAMES:
+    #         _ = image.create_dataset(cam_name, (MAX_TIMESTEPS, 480, 640, 3), dtype='uint8',
+    #                                  chunks=(1, 480, 640, 3), )
+    #     number_joints = 7 if HALVED_POLICY else 14
+    #     _ = obs.create_dataset('qpos', (MAX_TIMESTEPS, number_joints))
+    #     _ = obs.create_dataset('qvel', (MAX_TIMESTEPS, number_joints))
+    #     _ = obs.create_dataset('effort', (MAX_TIMESTEPS, number_joints))
+    #     _ = obs.create_dataset('parts_poses', (MAX_TIMESTEPS, 7))
+    #     _ = root.create_dataset('action', (MAX_TIMESTEPS, number_joints))
+
+    #     for name, array in data_dict.items():
+    #         root[name][...] = array
+    # print(f'Saving: {time.time() - t0:.1f} secs')
 
 
 def normalize_last_observation(observations):
