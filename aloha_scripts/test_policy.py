@@ -17,7 +17,7 @@ import modern_robotics as mr
 import time
 import os
 from trajectory_diffusion.datasets.scalers import standardize, normalize, denormalize, destandardize
-
+from scipy.spatial.transform import Rotation as R
 log = logging.getLogger(__name__)
 OmegaConf.register_new_resolver("eval", eval)
 
@@ -26,7 +26,7 @@ MAX_TIMESTEPS = 10000  # FIX: doesn't account for multiple actions per predictio
 CAMERA_NAMES = []  # 'cam_low','cam_high', 'cam_left_wrist', 'cam_right_wrist'
 DATASET_DIR = 'data/task_1/'
 
-MOVE_TIME_ARM = 1 #.1  # in seconds
+MOVE_TIME_ARM = 0 #.1  # in seconds
 MOVE_TIME_GRIPPER = 0  # in seconds
 HALVED_POLICY = True
 
@@ -80,11 +80,12 @@ def main(cfg: DictConfig) -> None:
                     ts[key] = value[:value.shape[0] // 2]
                 #TODO Images
             #ts = {key: value[:value.shape[0] // 2] for key, value in ts.items()}
+        ts = adjust_parts_poses(ts, parts_poses_euler)
         normalize_last_observation(ts)
         standardize_last_obserservation(ts)
     actions = []
     actual_dt_history = []
-    observations = [adjust_parts_poses(adjust_images(state), parts_poses_euler) for state in copy.deepcopy(timesteps)]  # use ts.observation on real_env
+    observations = [adjust_images(state) for state in copy.deepcopy(timesteps)]  # use ts.observation on real_env
 
     # profiler = cProfile.Profile()
     # profiler.enable()
@@ -133,12 +134,13 @@ def main(cfg: DictConfig) -> None:
                 for key, value in ts.items():
                     if key != 'images' and key != 'parts_poses':
                         ts[key] = value[:value.shape[0] // 2]
+            ts = adjust_parts_poses(ts, parts_poses_euler)
             normalize_last_observation(ts)
             standardize_last_obserservation(ts)
             t2 = time.time()  #
             timesteps.append(ts)
             actions.append(action[i])
-            observations.append(adjust_parts_poses(adjust_images(copy.deepcopy(ts)), parts_poses_euler))
+            observations.append(adjust_images(copy.deepcopy(ts)))
             actual_dt_history.append([t0, t1, t2])
     
     # profiler.disable()
