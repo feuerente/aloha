@@ -4,5 +4,6 @@
 /aloha_scripts/.idea/
 __pycache__/
 .vscode/
+aloha_scripts/data/*
 /data
 /outputs

@@ -1,6 +1,9 @@
 import time
 import sys
 import IPython
+import matplotlib.pyplot as plt
+import numpy as np
+from collections import deque
 e = IPython.embed
 
 from interbotix_xs_modules.arm import InterbotixManipulatorXS
@@ -50,21 +53,44 @@ def teleop(robot_side):
     prep_robots(master_bot, puppet_bot)
     press_to_start(master_bot)
 
+    fix, ax = plt.subplots()
+    ee_poses = deque(maxlen=50)
+
     ### Teleoperation loop
     gripper_command = JointSingleCommand(name="gripper")
     while True:
         # sync joint positions
         master_state_joints = master_bot.dxl.joint_states.position[:6]
-        print("Current EEF Position: ",puppet_bot.arm.get_ee_pose())
         puppet_bot.arm.set_joint_positions(master_state_joints, blocking=False)
         # sync gripper positions
         master_gripper_joint = master_bot.dxl.joint_states.position[6]
         puppet_gripper_joint_target = MASTER2PUPPET_JOINT_FN(master_gripper_joint)
         gripper_command.cmd = puppet_gripper_joint_target
         puppet_bot.gripper.core.pub_single.publish(gripper_command)
-        # sleep DT
-        time.sleep(DT)
 
+        # sleep DT
+        # time.sleep(DT)
+
+        ee_pose = puppet_bot.arm.get_ee_pose()
+        print(f"EE pose: {ee_pose[0,3]}, {ee_pose[1,3]}, {ee_pose[2,3]}, ")
+        #print(f"EE Translation: [{ee_pose[0]:.2f}, {ee_pose[0]:.2f}, {ee_pose[0]:.2f}]")
+        ee_poses.append(ee_pose)
+
+        # Clear the plots
+        ax.cla()
+
+        poses_array = np.array(ee_poses)
+        ax.plot(poses_array[:, 0, 3], label='x')
+        ax.plot(poses_array[:, 1, 3], label='y')
+        ax.plot(poses_array[:, 2, 3], label='z')
+        ax.legend(loc='upper right')
+        ax.set_title('Pose Translation')
+
+        plt.draw()
+        plt.pause(DT)
+
+    cv2.destroyAllWindows()
+    plt.close()
 
 if __name__=='__main__':
     side = sys.argv[1]

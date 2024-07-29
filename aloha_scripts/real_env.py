@@ -59,7 +59,8 @@ class RealEnv:
         self.gripper_command = JointSingleCommand(name="gripper")
 
         self.furniture = furniture_factory(furniture)
-        self.last_parts_pose = [0] * self.furniture.num_parts * 7
+        self.last_found_parts_poses = [0] * self.furniture.num_parts * 7
+        self.last_parts_poses = None
         # self.image_recorder = self.furniture.start_detection()
         self.furniture.start_detection()
 
@@ -101,11 +102,41 @@ class RealEnv:
         Handle parts not found by using the last value for that pose.
         """
         parts_poses, parts_found = self.furniture.get_parts_poses()
+        parts_poses = self.handle_missing_parts_poses(parts_poses, parts_found)
+        return self.fix_parts_poses_outlier(parts_poses)
+
+    def handle_missing_parts_poses(self, parts_poses, parts_found):
         for part_idx, part_found in enumerate(parts_found):
             if not part_found:
-                parts_poses[part_idx * 7: (part_idx + 1) * 7] = self.last_parts_pose[part_idx * 7: (part_idx + 1) * 7]
-            self.last_parts_pose = parts_poses
+                parts_poses[part_idx * 7: (part_idx + 1) * 7] = self.last_found_parts_poses[part_idx * 7: (part_idx + 1) * 7]
+            self.last_found_parts_poses = parts_poses
+        return parts_poses
+
+    def fix_parts_poses_outlier(self, parts_poses):
+        """Fix outliers from false positive detection."""
+        max_x_movement = 0.03
+        max_y_movement = 0.03
+        max_z_movement = 0.03
+
+        if self.last_parts_poses is None:
+            self.last_parts_poses = parts_poses
             return parts_poses
+
+        for part_idx in range(len(parts_poses) // 7):
+            part_pose = parts_poses.reshape(-1, 7)[part_idx]
+            last_part_pose = self.last_parts_poses.reshape(-1, 7)[part_idx]
+
+            # Detect outliers by max x,y,z movement between steps
+            x_diff = abs(part_pose[0] - last_part_pose[0])
+            y_diff = abs(part_pose[1] - last_part_pose[1])
+            z_diff = abs(part_pose[2] - last_part_pose[2])
+
+            if x_diff > max_x_movement or y_diff > max_y_movement or z_diff > max_z_movement:
+                print(f"INFO: parts_poses outlier detected and compensated!")
+                # Replace detected outlier with last found part pose
+                parts_poses[part_idx * 7: (part_idx + 1) * 7] = last_part_pose
+            self.last_parts_poses = parts_poses
+        return parts_poses
 
     def set_gripper_pose(self, left_gripper_desired_pos_normalized, right_gripper_desired_pos_normalized):
         left_gripper_desired_joint = PUPPET_GRIPPER_JOINT_UNNORMALIZE_FN(left_gripper_desired_pos_normalized)
@@ -150,14 +181,28 @@ class RealEnv:
             discount=None,
             observation=self.get_observation())
 
-    def step(self, action):
+    def step(self, action, move_time_arm=0, move_time_gripper=0):
+        """
+        Execute one step in the environment.
+        The move time for the arm and gripper can be specified for testing.
+        """
         state_len = int(len(action) / 2)
         left_action = action[:state_len]
         right_action = action[state_len:]
-        self.puppet_bot_left.arm.set_joint_positions(left_action[:6], blocking=False)
+
+        if move_time_arm == 0:
+            self.puppet_bot_left.arm.set_joint_positions(left_action[:6], blocking=False)
         # self.puppet_bot_right.arm.set_joint_positions(right_action[:6], blocking=False)
-        self.set_gripper_pose(left_action[-1], right_action[-1])
-        time.sleep(DT)
+        else:
+            move_arms([self.puppet_bot_left], [left_action[:6]], move_time_arm)
+            #move_arms(self.puppet_bot_right, right_action[:6], move_time_arm)
+        if move_time_gripper == 0:
+            self.set_gripper_pose(left_action[-1], right_action[-1])
+        else:
+            move_grippers([self.puppet_bot_left], [left_action[6]], move_time_gripper)
+            #move_grippers(self.puppet_bot_right, right_action[6], move_time_gripper)
+
+        time.sleep(DT)  # Not needed with move_arms
         return dm_env.TimeStep(
             step_type=dm_env.StepType.MID,
             reward=self.get_reward(),

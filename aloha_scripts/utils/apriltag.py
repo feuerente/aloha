@@ -7,11 +7,13 @@ class AprilTag:
     def __init__(self, tag_size):
         self.at_detector = Detector(
             families=config["furniture"]["tag_family"],
+            max_hamming=0,
             nthreads=4,
-            quad_decimate=1.0,
-            # quad_sigma=0.0,
+            # quad_decimate=1.0,
+            # quad_sigma=0.8,
             # refine_edges=1,
             # decode_sharpening=0.25,
+
             debug=0,
         )
         self.tag_size = tag_size
