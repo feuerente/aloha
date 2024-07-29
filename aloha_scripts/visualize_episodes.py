@@ -43,6 +43,7 @@ def main(args):
     qpos, qvel, effort, action, parts_poses, image_dict = load_hdf5(dataset_dir, dataset_name)
     save_videos(image_dict, DT, video_path=os.path.join(dataset_dir, dataset_name + '_video.mp4'))
     visualize_joints(qpos, action, plot_path=os.path.join(dataset_dir, dataset_name + '_qpos.png'))
+    visualize_single(qvel, 'qvel', plot_path=os.path.join(dataset_dir, dataset_name + '_qvel.png'))
     visualize_single(effort, 'effort', plot_path=os.path.join(dataset_dir, dataset_name + '_effort.png'))
     visualize_parts_poses(parts_poses, 'parts_poses',
                           plot_path=os.path.join(dataset_dir, dataset_name + '_parts_poses.png'))
@@ -126,9 +127,9 @@ def visualize_joints(qpos_list, command_list, plot_path=None, ylim=None, label_o
     plt.close()
 
 
-def visualize_single(efforts_list, label, plot_path=None, ylim=None, label_overwrite=None):
-    efforts = np.array(efforts_list)  # ts, dim
-    num_ts, num_dim = efforts.shape
+def visualize_single(value_list, label, plot_path=None, ylim=None, label_overwrite=None):
+    values = np.array(value_list)  # ts, dim
+    num_ts, num_dim = values.shape
     h, w = 2, num_dim
     num_figs = num_dim
     fig, axs = plt.subplots(num_figs, 1, figsize=(w, h * num_figs))
@@ -137,7 +138,7 @@ def visualize_single(efforts_list, label, plot_path=None, ylim=None, label_overw
     all_names = [name + '_left' for name in STATE_NAMES] + [name + '_right' for name in STATE_NAMES]
     for dim_idx in range(num_dim):
         ax = axs[dim_idx]
-        ax.plot(efforts[:, dim_idx], label=label)
+        ax.plot(values[:, dim_idx], label=label)
         ax.set_title(f'Joint {dim_idx}: {all_names[dim_idx]}')
         ax.legend()
 
@@ -148,7 +149,7 @@ def visualize_single(efforts_list, label, plot_path=None, ylim=None, label_overw
 
     plt.tight_layout()
     plt.savefig(plot_path)
-    print(f'Saved effort plot to: {plot_path}')
+    print(f'Saved {label} plot to: {plot_path}')
     plt.close()
 
 

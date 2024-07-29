@@ -25,8 +25,9 @@ MAX_TIMESTEPS = 1000
 CAMERA_NAMES = []  # 'cam_low','cam_high', 'cam_left_wrist', 'cam_right_wrist'
 DATASET_DIR = 'data/task_1/'
 
-MOVE_TIME_ARM = 3  # in seconds
+MOVE_TIME_ARM = 0 #.1  # in seconds
 MOVE_TIME_GRIPPER = 0  # in seconds
+HALVED_POLICY = True
 
 
 @hydra.main(version_base=None, config_path="/home/studentgroup1/trajectory-diffusion-prak/conf", config_name=CONFIG)
@@ -49,9 +50,10 @@ def main(cfg: DictConfig) -> None:
 
     # hydra_config['device'] = 'cpu'
 
-    t_obs = cfg.get("t_obs")
-    t_act = cfg.get("t_act")
+    t_obs = hydra_config.get("t_obs")
+    t_act = hydra_config.get("t_act")
     parts_poses_euler = "parts_poses_euler" in hydra_config.dataset_config and hydra_config.dataset_config.parts_poses_euler
+    relative_action = "relative_action_values" in hydra_config.agent_config.process_batch_config and hydra_config.agent_config.process_batch_config.relative_action_values
 
     # Setup agent, and workspace
     agent, workspace = setup_agent_and_workspace(hydra_config)
@@ -68,53 +70,70 @@ def main(cfg: DictConfig) -> None:
     for i in range(t_obs - 1):
         ts = env.get_observation()
         timesteps.append(ts)
+    for ts in timesteps:
+        if HALVED_POLICY:
+            for key, value in ts.items():
+                if key != 'images' and key != 'parts_poses':
+                    ts[key] = value[:value.shape[0] // 2]
+                #TODO Images
+            #ts = {key: value[:value.shape[0] // 2] for key, value in ts.items()}
+        normalize_last_observation(ts)
+        standardize_last_obserservation(ts)
     actions = []
     actual_dt_history = []
     observations = [adjust_parts_poses(adjust_images(state), parts_poses_euler) for state in copy.deepcopy(timesteps)]  # use ts.observation on real_env
 
     for t in tqdm(range(MAX_TIMESTEPS)):
         t0 = time.time()  #
-        normalize_last_observation(observations[-1])
-        standardize_last_obserservation(observations[-1])
         last_obs = last_observations(observations[-t_obs:])
         last_obs.pop('effort', None)
+        last_obs = {key: value.to(torch.device('cuda')) for key, value in last_obs.items()}
+        
         # TODO image_transforms
         action = torch.squeeze(agent.predict(observation=last_obs, extra_inputs=dict()))
+        action = action.to(torch.device('cpu'))
         # unnormalize and unstandardize the action if necessary
         if NORMALIZE_ACTION:
             action = denormalize(action, SCALER_VALUES['action'], symmetric=NORMALIZE_SYMMETRICALLY)
         if STANDARDIZE_ACTION:
             action = destandardize(action, SCALER_VALUES['action'])
+         #need to make the action shape for 2 robots, simply copy the action for the second robot even tho it wont be used
+        last_qpos = last_obs['qpos'].to(torch.device('cpu'))[-1,-1,:]#torch.tensor(env.puppet_bot_left.arm.get_joint_commands())#
+        if len(action.size()) == 1:
+            action = action[None,:]
+        if HALVED_POLICY:
+            action = torch.cat([action, action], dim=1)
+            last_qpos = torch.cat([last_qpos,last_qpos])
         for i in range(t_act):
             t1 = time.time()  #
             current_pos = env.puppet_bot_left.arm.get_ee_pose()
+            #add current joint states to the actions
+            if relative_action:
+                action[i] -= last_qpos
             destination = mr.FKinSpace(env.puppet_bot_left.arm.robot_des.M, env.puppet_bot_left.arm.robot_des.Slist,
-                                       action[0:6].detach().numpy())
-            print(destination)
-            # compare the current position with the destination such that we don t make to big steps
-            # according to stackoverflow this gives us the offset between the two matrices
-            # we could also just calculate the distance between the translation vectors of the transformation matrix
-            offset = np.linalg.inv(current_pos) * destination
+                                       action[i][0:6].detach().numpy())
+            print(destination[0:3,3])
+            print(current_pos[0:3,3])
             # We will have to findout what proper distances are
             # check the translation vector
-            if destination[2, 3] < 0.05:
-                print("Warning: Height will be to low")
-                while (True):
-                    # wait for the user to press enter
-                    if input("Press enter to continue") == "":
-                        break
-
-                        # if np.linalg.norm(offset[0:3,3]) > 0.01:
-            #     print("Warning: The offset is too big!")
-            #     while(True):
-            #         #wait for the user to press enter
+            # if destination[2, 3] < 0.05:
+            #     print("Warning: Height will be to low")
+            #     while (True):
+            #         # wait for the user to press enter
             #         if input("Press enter to continue") == "":
             #             break
-            ts = env.step(action, move_time_arm=MOVE_TIME_ARM, move_time_gripper=MOVE_TIME_GRIPPER)
+
+            ts = env.step(action[i], move_time_arm=MOVE_TIME_ARM, move_time_gripper=MOVE_TIME_GRIPPER).observation
+            if HALVED_POLICY:
+                for key, value in ts.items():
+                    if key != 'images' and key != 'parts_poses':
+                        ts[key] = value[:value.shape[0] // 2]
+            normalize_last_observation(ts)
+            standardize_last_obserservation(ts)
             t2 = time.time()  #
             timesteps.append(ts)
-            actions.append(action)
-            observations.append(adjust_parts_poses(adjust_images(copy.deepcopy(ts.observation)), parts_poses_euler))
+            actions.append(action[i])
+            observations.append(adjust_parts_poses(adjust_images(copy.deepcopy(ts)), parts_poses_euler))
             actual_dt_history.append([t0, t1, t2])
 
     # save the data
@@ -167,13 +186,13 @@ def main(cfg: DictConfig) -> None:
 def normalize_last_observation(observations):
     for key in NORMALIZE_KEYS:
         # Normalize all trajectories
-        observations[key] = normalize(observations[key], SCALER_VALUES[key], symmetric=NORMALIZE_SYMMETRICALLY)
+        observations[key] = normalize(torch.tensor(observations[key]), SCALER_VALUES[key], symmetric=NORMALIZE_SYMMETRICALLY)
 
 
 def standardize_last_obserservation(observations):
     for key in STANDARDIZE_KEYS:
         # Standardize all trajectories
-        observations[key] = standardize(observations[key], torch.tensor(SCALER_VALUES[key]))
+        observations[key] = standardize(torch.tensor(observations[key]), torch.tensor(SCALER_VALUES[key]))
 
 
 def adjust_images(observation):
