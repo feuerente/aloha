@@ -7,6 +7,7 @@ from omegaconf import DictConfig, OmegaConf
 import numpy as np
 import random
 import copy
+import cProfile
 
 from trajectory_diffusion.utils.setup_helper import setup_agent_and_workspace, parse_wandb_to_hydra_config
 from real_env import make_real_env
@@ -21,11 +22,11 @@ log = logging.getLogger(__name__)
 OmegaConf.register_new_resolver("eval", eval)
 
 CONFIG = "test_trained_agent_in_env_furniture"
-MAX_TIMESTEPS = 80  # FIX: doesn't account for multiple actions per prediction
+MAX_TIMESTEPS = 10000  # FIX: doesn't account for multiple actions per prediction
 CAMERA_NAMES = []  # 'cam_low','cam_high', 'cam_left_wrist', 'cam_right_wrist'
 DATASET_DIR = 'data/task_1/'
 
-MOVE_TIME_ARM = 0 #.1  # in seconds
+MOVE_TIME_ARM = 1 #.1  # in seconds
 MOVE_TIME_GRIPPER = 0  # in seconds
 HALVED_POLICY = True
 
@@ -84,6 +85,8 @@ def main(cfg: DictConfig) -> None:
     actual_dt_history = []
     observations = [adjust_images(state) for state in copy.deepcopy(timesteps)]  # use ts.observation on real_env
 
+    # profiler = cProfile.Profile()
+    # profiler.enable()
     for t in tqdm(range(MAX_TIMESTEPS)):
         t0 = time.time()  #
         last_obs = last_observations(observations[-t_obs:])
@@ -107,12 +110,12 @@ def main(cfg: DictConfig) -> None:
             last_qpos = torch.cat([last_qpos,last_qpos])
         for i in range(t_act):
             t1 = time.time()  #
-            current_pos = env.puppet_bot_left.arm.get_ee_pose()
+            # current_pos = env.puppet_bot_left.arm.get_ee_pose()
             #add current joint states to the actions
             if relative_action:
                 action[i] -= last_qpos
-            destination = mr.FKinSpace(env.puppet_bot_left.arm.robot_des.M, env.puppet_bot_left.arm.robot_des.Slist,
-                                       action[i][0:6].detach().numpy())
+            # destination = mr.FKinSpace(env.puppet_bot_left.arm.robot_des.M, env.puppet_bot_left.arm.robot_des.Slist,
+            #                            action[i][0:6].detach().numpy())
             # print(destination[0:3,3])
             # print(current_pos[0:3,3])
             # We will have to findout what proper distances are
@@ -136,6 +139,9 @@ def main(cfg: DictConfig) -> None:
             actions.append(action[i])
             observations.append(adjust_images(copy.deepcopy(ts)))
             actual_dt_history.append([t0, t1, t2])
+    
+    # profiler.disable()
+    # profiler.dump_stats("./profiling/test_policy_loop.prof")
 
     # TODO checkout
     agent.restore_model_weights()
