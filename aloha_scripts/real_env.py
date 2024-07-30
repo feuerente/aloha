@@ -46,7 +46,11 @@ class RealEnv:
             init_node,
             furniture: str,
             setup_robots=True,
+            left_arm_only: bool = False,
     ):
+        self.left_arm_only = left_arm_only
+        self.action_space = 14
+
         self.puppet_bot_left = InterbotixManipulatorXS(robot_model="vx300s", group_name="arm", gripper_name="gripper",
                                                        robot_name=f'puppet_left', init_node=init_node)
         self.puppet_bot_right = InterbotixManipulatorXS(robot_model="vx300s", group_name="arm", gripper_name="gripper",
@@ -157,11 +161,18 @@ class RealEnv:
         move_grippers([self.puppet_bot_left, self.puppet_bot_right], [PUPPET_GRIPPER_JOINT_OPEN] * 2, move_time=0.5)
         move_grippers([self.puppet_bot_left, self.puppet_bot_right], [PUPPET_GRIPPER_JOINT_CLOSE] * 2, move_time=1)
 
+    def get_reset_action(self):
+        reset_action_single_arm = START_ARM_POSE[:6] + [PUPPET_GRIPPER_JOINT_CLOSE]
+        if self.left_arm_only:
+            return reset_action_single_arm
+        return reset_action_single_arm + reset_action_single_arm
+
     def get_observation(self):
+        cutoff = 7 if self.left_arm_only else 14
         obs = collections.OrderedDict()
-        obs['qpos'] = self.get_qpos()
-        obs['qvel'] = self.get_qvel()
-        obs['effort'] = self.get_effort()
+        obs['qpos'] = self.get_qpos()[cutoff]
+        obs['qvel'] = self.get_qvel()[cutoff]
+        obs['effort'] = self.get_effort()[cutoff]
         obs['images'] = self.get_images()
         obs['parts_poses'] = self.get_parts_poses()
         return obs
@@ -188,23 +199,17 @@ class RealEnv:
         Execute one step in the environment.
         The move time for the arm and gripper can be specified for testing.
         """
-        state_len = int(len(action) / 2)
+        state_len = int(self.action_space / 2)
         left_action = action[:state_len]
-        right_action = action[state_len:]
 
-        if move_time_arm == 0:
-            self.puppet_bot_left.arm.set_joint_positions(left_action[:6], blocking=False)
-        # self.puppet_bot_right.arm.set_joint_positions(right_action[:6], blocking=False)
-        else:
-            move_arms([self.puppet_bot_left], [left_action[:6]], move_time_arm)
-            #move_arms(self.puppet_bot_right, right_action[:6], move_time_arm)
-        if move_time_gripper == 0:
-            self.set_gripper_pose(left_action[-1], right_action[-1])
-        else:
-            move_grippers([self.puppet_bot_left], [left_action[6]], move_time_gripper)
-            #move_grippers(self.puppet_bot_right, right_action[6], move_time_gripper)
+        move_arms([self.puppet_bot_left], [left_action[:6]], move_time_arm)
+        move_grippers([self.puppet_bot_left], [left_action[-1]], move_time_gripper, normalize=True)
 
-        # time.sleep(DT)  # Not needed with move_arms
+        if not self.left_arm_only:
+            right_action = action[state_len:]
+            move_arms(self.puppet_bot_right, right_action[:6], move_time_arm)
+            move_grippers([self.puppet_bot_right], [right_action[-1]], move_time_gripper, normalize=True)
+
         return dm_env.TimeStep(
             step_type=dm_env.StepType.MID,
             reward=self.get_reward(),
@@ -224,8 +229,8 @@ def get_action(master_bot_left, master_bot_right):
     return action
 
 
-def make_real_env(init_node, furniture="square_table", setup_robots=True):
-    env = RealEnv(init_node, furniture, setup_robots=setup_robots)
+def make_real_env(init_node, furniture="square_table", setup_robots=True, left_arm_only=False):
+    env = RealEnv(init_node, furniture, setup_robots=setup_robots, left_arm_only=left_arm_only)
     return env
 
 

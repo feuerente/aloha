@@ -5,7 +5,7 @@ import numpy as np
 from interbotix_xs_msgs.msg import JointSingleCommand
 
 from utils.apriltag import AprilTag
-from constants import DT, config
+from constants import DT, config, PUPPET_GRIPPER_JOINT_UNNORMALIZE_FN
 
 e = IPython.embed
 
@@ -167,6 +167,11 @@ def get_arm_gripper_positions(bot):
     return joint_position
 
 def move_arms(bot_list, target_pose_list, move_time=1):
+    if move_time == 0:
+        for bot_id, bot in enumerate(bot_list):
+            bot.arm.set_joint_positions(target_pose_list[bot_id], blocking=False)
+        return
+
     num_steps = int(move_time / DT)
     curr_pose_list = [get_arm_joint_positions(bot) for bot in bot_list]
     traj_list = [np.linspace(curr_pose, target_pose, num_steps) for curr_pose, target_pose in zip(curr_pose_list, target_pose_list)]
@@ -175,8 +180,17 @@ def move_arms(bot_list, target_pose_list, move_time=1):
             bot.arm.set_joint_positions(traj_list[bot_id][t], blocking=False)
         time.sleep(DT)
 
-def move_grippers(bot_list, target_pose_list, move_time):
+def move_grippers(bot_list, target_pose_list, move_time, normalize=False):
     gripper_command = JointSingleCommand(name="gripper")
+    if normalize:
+        target_pose_list = [PUPPET_GRIPPER_JOINT_UNNORMALIZE_FN(target_pose) for target_pose in target_pose_list]
+
+    if move_time == 0:
+        for bot_id, bot in enumerate(bot_list):
+            gripper_command.cmd = target_pose_list[bot_id]
+            bot.gripper.core.pub_single.publish(gripper_command)
+        return
+
     num_steps = int(move_time / DT)
     curr_pose_list = [get_arm_gripper_positions(bot) for bot in bot_list]
     traj_list = [np.linspace(curr_pose, target_pose, num_steps) for curr_pose, target_pose in zip(curr_pose_list, target_pose_list)]

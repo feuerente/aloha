@@ -1,3 +1,5 @@
+import math
+
 import hydra
 import torch
 import logging
@@ -22,11 +24,11 @@ log = logging.getLogger(__name__)
 OmegaConf.register_new_resolver("eval", eval)
 
 CONFIG = "test_trained_agent_in_env_furniture"
-MAX_TIMESTEPS = 10000  # FIX: doesn't account for multiple actions per prediction
+MAX_ACTION_STEPS = 10000
 CAMERA_NAMES = []  # 'cam_low','cam_high', 'cam_left_wrist', 'cam_right_wrist'
 DATASET_DIR = 'data/task_1/'
 
-MOVE_TIME_ARM = 1 #.1  # in seconds
+MOVE_TIME_ARM = 1  # in seconds
 MOVE_TIME_GRIPPER = 0  # in seconds
 HALVED_POLICY = True
 
@@ -85,9 +87,13 @@ def main(cfg: DictConfig) -> None:
     actual_dt_history = []
     observations = [adjust_images(state) for state in copy.deepcopy(timesteps)]  # use ts.observation on real_env
 
+    max_action_sequences = math.ceil(MAX_ACTION_STEPS / t_act)
+    action_step_counter = 0
+
     # profiler = cProfile.Profile()
     # profiler.enable()
-    for t in tqdm(range(MAX_TIMESTEPS)):
+    progress_bar = tqdm(total=MAX_ACTION_STEPS, desc="Testing Agent", unit="actions")
+    for t in range(max_action_sequences):
         t0 = time.time()  #
         last_obs = last_observations(observations[-t_obs:])
         last_obs.pop('effort', None)
@@ -109,6 +115,8 @@ def main(cfg: DictConfig) -> None:
             action = torch.cat([action, action], dim=1)
             last_qpos = torch.cat([last_qpos,last_qpos])
         for i in range(t_act):
+            if action_step_counter >= MAX_ACTION_STEPS:
+                break
             t1 = time.time()  #
             # current_pos = env.puppet_bot_left.arm.get_ee_pose()
             #add current joint states to the actions
@@ -139,6 +147,9 @@ def main(cfg: DictConfig) -> None:
             actions.append(action[i])
             observations.append(adjust_images(copy.deepcopy(ts)))
             actual_dt_history.append([t0, t1, t2])
+
+            action_step_counter += 1
+            progress_bar.update(action_step_counter)
     
     # profiler.disable()
     # profiler.dump_stats("./profiling/test_policy_loop.prof")
