@@ -16,6 +16,10 @@ import modern_robotics as mr
 import time
 import os
 from trajectory_diffusion.datasets.scalers import standardize, normalize, denormalize, destandardize
+from trajectory_diffusion.datasets.trajectory_dataset import TrajectoryDataset
+
+from torchvision import transforms
+from typing import Dict, Tuple, Optional, List, Union, Any
 
 log = logging.getLogger(__name__)
 OmegaConf.register_new_resolver("eval", eval)
@@ -53,7 +57,6 @@ def main(cfg: DictConfig) -> None:
     t_obs = hydra_config.get("t_obs")
     t_act = hydra_config.get("t_act")
     relative_action = "relative_action_values" in hydra_config.agent_config.process_batch_config and hydra_config.agent_config.process_batch_config.relative_action_values
-
     # Setup agent, and workspace
     agent, workspace = setup_agent_and_workspace(hydra_config)
     # setup constant values
@@ -69,6 +72,10 @@ def main(cfg: DictConfig) -> None:
     for i in range(t_obs - 1):
         ts = env.get_observation()
         timesteps.append(ts)
+    image_transforms = {}
+    image_shapes = {}
+    for key in IMAGE_KEYS:
+        image_transforms[key], image_shapes[key] = compose_image_transform(timesteps[0]['images'], key, CROP_SIZES, CROP_SIZES, RANDOM_CROP, NORMALIZE_IMAGES)
     for ts in timesteps:
         if HALVED_POLICY:
             for key, value in ts.items():
@@ -76,8 +83,9 @@ def main(cfg: DictConfig) -> None:
                     ts[key] = value[:value.shape[0] // 2]
                 #TODO Images
             #ts = {key: value[:value.shape[0] // 2] for key, value in ts.items()}
+        transform_last_image(ts, image_transforms)
         normalize_last_observation(ts)
-        standardize_last_obserservation(ts)
+        standardize_last_observation(ts)
     actions = []
     actual_dt_history = []
     observations = [adjust_images(state) for state in copy.deepcopy(timesteps)]  # use ts.observation on real_env
@@ -103,12 +111,17 @@ def main(cfg: DictConfig) -> None:
         if HALVED_POLICY:
             action = torch.cat([action, action], dim=1)
             last_qpos = torch.cat([last_qpos,last_qpos])
+         #need to make the action shape for 2 robots, simply copy the action for the second robot even tho it wont be used
+        if relative_action:
+                # Subtract the action value of time_step t-1 from the action value of time_step t0, t1, ...
+                # to get relative action values.
+                absolute_start = actions[-1]
+                action += absolute_start
         for i in range(t_act):
             t1 = time.time()  #
             current_pos = env.puppet_bot_left.arm.get_ee_pose()
             #add current joint states to the actions
-            if relative_action:
-                action[i] -= last_qpos
+            
             destination = mr.FKinSpace(env.puppet_bot_left.arm.robot_des.M, env.puppet_bot_left.arm.robot_des.Slist,
                                        action[i][0:6].detach().numpy())
             print(destination[0:3,3])
@@ -127,8 +140,9 @@ def main(cfg: DictConfig) -> None:
                 for key, value in ts.items():
                     if key != 'images' and key != 'parts_poses':
                         ts[key] = value[:value.shape[0] // 2]
+            transform_last_image(ts, image_transforms)
             normalize_last_observation(ts)
-            standardize_last_obserservation(ts)
+            standardize_last_observation(ts)
             t2 = time.time()  #
             timesteps.append(ts)
             actions.append(action[i])
@@ -181,6 +195,9 @@ def main(cfg: DictConfig) -> None:
             root[name][...] = array
     print(f'Saving: {time.time() - t0:.1f} secs')
 
+def transform_last_image(observations,image_transforms):
+    for key in IMAGE_KEYS:
+        observations['images'][key] = image_transforms[key](torch.tensor(observations['images'][key]))
 
 def normalize_last_observation(observations):
     for key in NORMALIZE_KEYS:
@@ -188,7 +205,7 @@ def normalize_last_observation(observations):
         observations[key] = normalize(torch.tensor(observations[key]), SCALER_VALUES[key], symmetric=NORMALIZE_SYMMETRICALLY)
 
 
-def standardize_last_obserservation(observations):
+def standardize_last_observation(observations):
     for key in STANDARDIZE_KEYS:
         # Standardize all trajectories
         observations[key] = standardize(torch.tensor(observations[key]), torch.tensor(SCALER_VALUES[key]))
@@ -255,12 +272,12 @@ def read_config(hydra_config):
     SCALER_VALUES = OmegaConf.to_container(
         hydra_config['workspace_config']['env_config']['scaler_config']['scaler_values'])
     dataset_confs = OmegaConf.to_container(hydra_config['dataset_config'])
-    # NORMALIZE_IMAGES = dataset_confs['normalize_images']
-    # CROP_SIZES = dataset_confs['crop_sizes'][0]
-    # IMAGE_KEYS = dataset_confs['image_keys']
-    # RANDOM_CROP = dataset_confs['random_crop']
-    PAD_START = dataset_confs['pad_start']
-    PAD_END = dataset_confs['pad_end']
+    NORMALIZE_IMAGES = hydra_config.dataset_config.get("normalize_images") if "normalize_images" in hydra_config.dataset_config else False
+    CROP_SIZES = hydra_config.dataset_config.get("crop_sizes") if "crop_sizes" in hydra_config.dataset_config else []
+    IMAGE_KEYS = hydra_config.dataset_config.get("cam_names") if "cam_names" in hydra_config.dataset_config else []
+    RANDOM_CROP = hydra_config.dataset_config.get("random_crop") if "random_crop" in hydra_config.dataset_config else False
+    PAD_START = hydra_config.dataset_config.get("pad_start") if "pad_start" in hydra_config.dataset_config else 0
+    PAD_END = hydra_config.dataset_config.get("pad_end") if "pad_end" in hydra_config.dataset_config else 0
     NORMALIZE_SYMMETRICALLY = dataset_confs['normalize_symmetrically']
     normalize_keys = dataset_confs['normalize_keys']
     standardize_keys = dataset_confs['standardize_keys']
@@ -287,6 +304,45 @@ def read_config(hydra_config):
 
     convert_to_tensor()
     NORMALIZE_KEYS, STANDARDIZE_KEYS = check_for_action()
+
+
+
+def compose_image_transform(image_observation,image_key: str, image_size: Optional[List[int]], crop_size: Optional[List[int]], random_crop: bool, normalize: bool) -> Tuple[transforms.Compose, Tuple[int, int, int]]:
+        image_transform_list = []
+
+        if normalize:
+            # Divide by 255 to scale to [0, 1]
+            image_transform_list.append(transforms.Lambda(lambda x: x / 255.0))
+
+
+        # Get tensor image
+        tensor_image = image_observation[image_key][0]
+        assert isinstance(tensor_image, torch.Tensor), f"Image must be a tensor, but is {type(tensor_image)}."
+        # Determine original image shape
+        org_image_shape = tuple(tensor_image.shape)
+        assert len(org_image_shape) == 3, f"Image must have 3 dimensions, but has {len(org_image_shape)}."
+        assert org_image_shape[0] == 3, f"Image must have 3 channels, but has {org_image_shape[0]} in shape {org_image_shape}."
+
+        # Resizing images
+        if image_size is None:
+            image_shape = org_image_shape
+        else:
+            assert isinstance(image_size, list) and len(image_size) == 2
+            image_shape = tuple([3] + image_size)
+            if image_size != list(org_image_shape[1:]):
+                image_transform_list.append(transforms.Resize(image_size, antialias=True))
+
+        # (Random) cropping images
+        if crop_size is not None:
+            if not crop_size[0] <= image_shape[1] and crop_size[1] <= image_shape[2]:
+                raise ValueError(f"Crop size {crop_size} is larger than image size {image_shape[1:]}.")
+            image_shape = tuple([3] + crop_size)
+            if random_crop:
+                image_transform_list.append(transforms.RandomCrop(crop_size))
+            else:
+                image_transform_list.append(transforms.CenterCrop(crop_size))
+
+        return transforms.Compose(image_transform_list), image_shape
 
 
 if __name__ == "__main__":
