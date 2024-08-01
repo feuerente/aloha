@@ -162,7 +162,7 @@ class RealEnv:
         move_grippers([self.puppet_bot_left, self.puppet_bot_right], [PUPPET_GRIPPER_JOINT_CLOSE] * 2, move_time=1)
 
     def get_reset_action(self):
-        reset_action_single_arm = START_ARM_POSE[:6] + [PUPPET_GRIPPER_JOINT_CLOSE]
+        reset_action_single_arm = START_ARM_POSE[:6] + [MASTER_GRIPPER_JOINT_NORMALIZE_FN(PUPPET_GRIPPER_JOINT_CLOSE)]
         if self.left_arm_only:
             return reset_action_single_arm
         return reset_action_single_arm + reset_action_single_arm
@@ -170,9 +170,9 @@ class RealEnv:
     def get_observation(self):
         cutoff = 7 if self.left_arm_only else 14
         obs = collections.OrderedDict()
-        obs['qpos'] = self.get_qpos()[cutoff]
-        obs['qvel'] = self.get_qvel()[cutoff]
-        obs['effort'] = self.get_effort()[cutoff]
+        obs['qpos'] = self.get_qpos()[:cutoff]
+        obs['qvel'] = self.get_qvel()[:cutoff]
+        obs['effort'] = self.get_effort()[:cutoff]
         obs['images'] = self.get_images()
         obs['parts_poses'] = self.get_parts_poses()
         return obs

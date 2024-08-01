@@ -6,14 +6,14 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 from trajectory_diffusion.utils.setup_helper import setup_agent, parse_wandb_to_hydra_config
 
-from aloha_scripts.utils.robot_tester import RobotTester
+from utils.robot_tester import RobotTester
 
 OmegaConf.register_new_resolver("eval", eval)
 
 
 CONFIG = "test_trained_agent_in_env_furniture"
-CONFIG_PATH = "/home/ralf/projects/alr_prak/trajectory-diffusion-prak.git/wt_default/conf"
-# CONFIG_PATH = "/home/studentgroup1/trajectory-diffusion-prak/conf"
+# CONFIG_PATH = "/home/ralf/projects/alr_prak/trajectory-diffusion-prak.git/wt_default/conf"
+CONFIG_PATH = "/home/studentgroup1/trajectory-diffusion-prak/conf"
 
 
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name=CONFIG)
