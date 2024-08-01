@@ -4,9 +4,11 @@ import time
 import IPython
 import dm_env
 import matplotlib.pyplot as plt
+import modern_robotics as mr
 import numpy as np
 from interbotix_xs_modules.arm import InterbotixManipulatorXS
 from interbotix_xs_msgs.msg import JointSingleCommand
+from scipy.spatial.transform import Rotation as R
 
 from constants import DT, START_ARM_POSE, MASTER_GRIPPER_JOINT_NORMALIZE_FN, PUPPET_GRIPPER_JOINT_UNNORMALIZE_FN
 from constants import PUPPET_GRIPPER_JOINT_OPEN, PUPPET_GRIPPER_JOINT_CLOSE
@@ -81,6 +83,23 @@ class RealEnv:
         left_gripper_qpos = [PUPPET_GRIPPER_POSITION_NORMALIZE_FN(left_qpos_raw[7])] # this is position not joint
         right_gripper_qpos = [PUPPET_GRIPPER_POSITION_NORMALIZE_FN(right_qpos_raw[7])] # this is position not joint
         return np.concatenate([left_arm_qpos, left_gripper_qpos, right_arm_qpos, right_gripper_qpos])
+
+    def get_eef_pose(self):
+        qpos = self.get_qpos()
+        eef_poses = []
+        for qpos_arm in qpos.reshape(-1, 7):
+            eef_pose_matrix = mr.FKinSpace(self.puppet_bot_left.arm.robot_des.M,
+                                           self.puppet_bot_left.arm.robot_des.Slist, qpos_arm)
+
+            translation = eef_pose_matrix[:3, 3]
+            rotation_matrix = eef_pose_matrix[:3, :3]
+
+            rotation = R.from_matrix(rotation_matrix)
+            euler_angles = rotation.as_euler('xyz', degrees=False)  # radians
+
+            eef_pose = np.concatenate((translation, euler_angles))
+            eef_poses.append(eef_pose)
+        return np.hstack(eef_poses, dtype=np.float32)
 
     def get_qvel(self):
         left_qvel_raw = self.recorder_left.qvel
@@ -175,6 +194,7 @@ class RealEnv:
         obs['effort'] = self.get_effort()[:cutoff]
         obs['images'] = self.get_images()
         obs['parts_poses'] = self.get_parts_poses()
+        obs['eef_pose'] = self.get_eef_pose()[:6 if self.left_arm_only else 12]
         return obs
 
     def get_reward(self):
