@@ -4,6 +4,7 @@ from functools import partial
 from typing import List
 
 import numpy as np
+import modern_robotics as mr
 import torch
 from scipy.spatial.transform import Rotation as R
 from tqdm import tqdm
@@ -11,8 +12,8 @@ from trajectory_diffusion.datasets.scalers import standardize, normalize, denorm
 from trajectory_diffusion.utils.helper import deque_to_array
 
 # Use fake_env for testing
-from aloha_scripts.real_env import make_real_env
-# from aloha_scripts.fake_env import make_real_env
+from real_env import make_real_env
+# from fake_env import make_real_env
 
 
 # TODO Record trajectory and timing
@@ -109,9 +110,8 @@ class RobotTester:
                 if action_step_counter >= self.max_action_steps:
                     break
 
-                # current_pos = env.puppet_bot_left.arm.get_ee_pose()
-                # destination = mr.FKinSpace(env.puppet_bot_left.arm.robot_des.M, env.puppet_bot_left.arm.robot_des.Slist,
-                #                            action[0:6].detach().numpy())
+                # current_pos = self.env.puppet_bot_left.arm.get_ee_pose()
+                # destination = mr.FKinSpace(self.env.puppet_bot_left.arm.robot_des.M, self.env.puppet_bot_left.arm.robot_des.Slist, action[0:6])
 
                 # Check height (Warning: EEF height not tip of the gripper)
                 # if (height := destination[2, 3]) < 0.05:
@@ -143,6 +143,8 @@ class RobotTester:
         for key, value in observation.items():
             if key not in self.keys:
                 continue
+
+            value = np.array(value, dtype=np.float32)
 
             if key == "parts_poses" and self.parts_poses_euler:
                 value = self.parts_poses_to_euler(value)
