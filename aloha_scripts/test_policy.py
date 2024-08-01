@@ -86,7 +86,7 @@ def main(cfg: DictConfig) -> None:
         transform_last_image(ts, image_transforms)
         normalize_last_observation(ts)
         standardize_last_observation(ts)
-    actions = []
+    actions = [torch.zeros(14)]
     actual_dt_history = []
     observations = [adjust_images(state) for state in copy.deepcopy(timesteps)]  # use ts.observation on real_env
 
@@ -121,9 +121,10 @@ def main(cfg: DictConfig) -> None:
             t1 = time.time()  #
             current_pos = env.puppet_bot_left.arm.get_ee_pose()
             #add current joint states to the actions
-            
+            current_action = last_qpos + action[i]
+            #.dxl.joint_states.position[:6]
             destination = mr.FKinSpace(env.puppet_bot_left.arm.robot_des.M, env.puppet_bot_left.arm.robot_des.Slist,
-                                       action[i][0:6].detach().numpy())
+                                       current_action[0:6].detach().numpy())
             print(destination[0:3,3])
             print(current_pos[0:3,3])
             # We will have to findout what proper distances are
@@ -135,7 +136,7 @@ def main(cfg: DictConfig) -> None:
             #         if input("Press enter to continue") == "":
             #             break
 
-            ts = env.step(action[i], move_time_arm=MOVE_TIME_ARM, move_time_gripper=MOVE_TIME_GRIPPER).observation
+            ts = env.step(current_action, move_time_arm=MOVE_TIME_ARM, move_time_gripper=MOVE_TIME_GRIPPER).observation
             if HALVED_POLICY:
                 for key, value in ts.items():
                     if key != 'images' and key != 'parts_poses':
@@ -145,7 +146,7 @@ def main(cfg: DictConfig) -> None:
             standardize_last_observation(ts)
             t2 = time.time()  #
             timesteps.append(ts)
-            actions.append(action[i])
+            actions.append(current_action)
             observations.append(adjust_images(copy.deepcopy(ts)))
             actual_dt_history.append([t0, t1, t2])
 
