@@ -1,6 +1,7 @@
 from torchvision import transforms
 from typing import Dict, Tuple, Optional, List, Union, Any
 import torch
+import numpy as np
 
    
 def compose_image_transform(image_observation,image_key: str, image_size: Optional[List[int]], crop_size: Optional[List[int]], random_crop: bool, normalize: bool) -> Tuple[transforms.Compose, Tuple[int, int, int]]:
@@ -9,10 +10,10 @@ def compose_image_transform(image_observation,image_key: str, image_size: Option
         # Divide by 255 to scale to [0, 1]
         image_transform_list.append(transforms.Lambda(lambda x: x / 255.0))
     # Get tensor image
-    tensor_image = image_observation[image_key][0]
+    tensor_image = torch.tensor(image_observation[image_key])
     assert isinstance(tensor_image, torch.Tensor), f"Image must be a tensor, but is {type(tensor_image)}."
     # Determine original image shape
-    org_image_shape = tuple(tensor_image.shape)
+    org_image_shape = tensor_image.shape
     assert len(org_image_shape) == 3, f"Image must have 3 dimensions, but has {len(org_image_shape)}."
     assert org_image_shape[0] == 3, f"Image must have 3 channels, but has {org_image_shape[0]} in shape {org_image_shape}."
     # Resizing images
@@ -33,3 +34,10 @@ def compose_image_transform(image_observation,image_key: str, image_size: Option
         else:
             image_transform_list.append(transforms.CenterCrop(crop_size))
     return transforms.Compose(image_transform_list), image_shape
+
+def adjust_images(image_observation,keys):
+    for key in keys:
+       if image_observation[key].shape[0] == 3:
+           continue
+       image_observation[key] =  np.moveaxis(image_observation[key],-1,0)
+    

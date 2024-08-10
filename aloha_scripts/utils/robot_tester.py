@@ -11,7 +11,7 @@ from tqdm import tqdm
 from trajectory_diffusion.datasets.scalers import standardize, normalize, denormalize, destandardize
 from trajectory_diffusion.utils.helper import deque_to_array
 
-from image_transformer import compose_image_transform
+from utils.image_transformer import compose_image_transform,adjust_images
 # Use fake_env for testing
 from real_env import make_real_env
 # from fake_env import make_real_env
@@ -35,13 +35,13 @@ class RobotTester:
                                  hydra_config["dataset_config"]["parts_poses_euler"]
         self.relative_action_values = "relative_action_values" in hydra_config["agent_config"][
             "process_batch_config"] and hydra_config["agent_config"]["process_batch_config"]["relative_action_values"]
-        self.normalize_images = hydra_config.dataset_config.get("normalize_images") if "normalize_images" in hydra_config.dataset_config else False
-        self.crop_sizes = hydra_config.dataset_config.get("crop_sizes") if "crop_sizes" in hydra_config.dataset_config else []
-        self.image_keys = hydra_config.dataset_config.get("cam_names") if "cam_names" in hydra_config.dataset_config else []
-        self.image_sizes = hydra_config.dataset_config.get("image_sizes") if "image_sizes" in hydra_config.dataset_config else None
-        self.random_crop = hydra_config.dataset_config.get("random_crop") if "random_crop" in hydra_config.dataset_config else False
-        self.pad_start = hydra_config.dataset_config.get("pad_start") if "pad_start" in hydra_config.dataset_config else 0
-        self.pad_end = hydra_config.dataset_config.get("pad_end") if "pad_end" in hydra_config.dataset_config else 0
+        self.normalize_images = hydra_config["dataset_config"].get("normalize_images") if "normalize_images" in hydra_config["dataset_config"] else False
+        self.crop_sizes = hydra_config["dataset_config"].get("crop_sizes") if "crop_sizes" in hydra_config["dataset_config"] else []
+        self.image_keys = hydra_config["dataset_config"].get("image_keys") if "image_keys" in hydra_config["dataset_config"] else []
+        self.image_sizes = hydra_config["dataset_config"].get("image_sizes") if "image_sizes" in hydra_config["dataset_config"] else None
+        self.random_crop = hydra_config["dataset_config"].get("random_crop") if "random_crop" in hydra_config["dataset_config"] else False
+        self.pad_start = hydra_config["dataset_config"].get("pad_start") if "pad_start" in hydra_config["dataset_config"] else 0
+        self.pad_end = hydra_config["dataset_config"].get("pad_end") if "pad_end" in hydra_config["dataset_config"] else 0
     
 
         self.env = make_real_env(init_node=True, furniture="table_leg", setup_robots=True,
@@ -58,10 +58,11 @@ class RobotTester:
 
         self.scaler_values = hydra_config["workspace_config"]["env_config"]["scaler_config"]["scaler_values"]
         start_images = self.env.get_observation()["images"]
+        adjust_images(start_images, self.image_keys)
         self.image_transforms = {}
         self.image_shapes = {}
-        for key in self.image_keys:
-            self.image_transforms[key], self.image_shapes[key] = compose_image_transform(start_images, key, self.image_sizes, self.crop_sizes, self.random_crop, self.normalize_images)
+        for (i,key) in enumerate(self.image_keys):
+            self.image_transforms[key], self.image_shapes[key] = compose_image_transform(start_images, key, self.image_sizes[i], self.crop_sizes[i], self.random_crop[i], self.normalize_images[i])
     
         for key in self.normalize_keys:
             assert key in self.scaler_values, f"Key {key} not found in scaler values."
@@ -155,21 +156,26 @@ class RobotTester:
 
     def update_observation_buffer(self, observation):
         for key, value in observation.items():
-            if key not in self.keys:
+            if key not in self.keys and not "images":
                 continue
+            
 
+            # TODO adjust images
+            # may if key == "images" then loop over all image keys and apply transform
+            # depending on that we have to flatten the observations s.t. value["images"][key] --> value[key]
+            if key == "images":
+                adjust_images(value,self.image_keys)
+                for (i,cam_name) in enumerate(self.image_keys):
+                    image = None
+                    image = self.image_transforms[cam_name](torch.tensor(value[cam_name]))
+                    self.observation_buffer[cam_name].append(image[...])
+                continue
             value = np.array(value, dtype=np.float32)
 
             if key == "parts_poses" and self.parts_poses_euler:
                 value = self.parts_poses_to_euler(value)
 
-            # TODO adjust images
-            # may if key == "images" then loop over all image keys and apply transform
-            # depending on that we have to flatten the observations s.t. value["images"][key] --> value[key]
-            if key in self.image_keys:
-                for cam_name in self.image_keys:
-                    value[cam_name] = self.image_transforms[cam_name](torch.tensor(value["images"][cam_name]))
-                self.observation_buffer[key].append(value)
+            
             if key in self.normalize_keys:
                 value = normalize(value, self.scaler_values[key], self.normalize_symmetrically)
             if key in self.standardize_keys:
