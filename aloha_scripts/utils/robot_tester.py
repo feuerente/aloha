@@ -27,6 +27,7 @@ class RobotTester:
         self.keys = dataset_config["keys"]
         self.max_action_steps = cfg["max_action_steps"]
         self.left_arm_only = cfg["left_arm_only"]
+        self.action_dim = 7 if self.left_arm_only else 14
         self.t_obs = hydra_config["t_obs"]
         self.t_act = hydra_config["t_act"]
         self.move_time_arm = cfg["move_time_arm"]
@@ -42,7 +43,11 @@ class RobotTester:
         self.random_crop = hydra_config["dataset_config"].get("random_crop") if "random_crop" in hydra_config["dataset_config"] else False
         self.pad_start = hydra_config["dataset_config"].get("pad_start") if "pad_start" in hydra_config["dataset_config"] else 0
         self.pad_end = hydra_config["dataset_config"].get("pad_end") if "pad_end" in hydra_config["dataset_config"] else 0
-    
+
+        self.temporal_agg = True
+        if self.temporal_agg:
+            self.all_time_actions = torch.zeros([self.max_action_steps, self.max_action_steps + self.t_act, self.action_dim])
+            # self.all_time_actions = torch.zeros([self.max_action_steps, self.max_action_steps + self.t_act, self.action_dim]).cuda()
 
         self.env = make_real_env(init_node=True, furniture="table_leg", setup_robots=True,
                                  left_arm_only=self.left_arm_only)
@@ -93,7 +98,7 @@ class RobotTester:
         action_step_counter = 0
 
         progress_bar = tqdm(total=self.max_action_steps, desc="Testing Agent", unit="action")
-        for action_sequence in range(max_action_sequences):
+        for t in range(self.max_action_steps):
             observation = deque_to_array(self.observation_buffer)
 
             # Create torch tensors from numpy arrays
@@ -110,36 +115,52 @@ class RobotTester:
                     extra_inputs[key] = val.to(agent.device)
 
             # Predict the next action sequence
-            actions = agent.predict(observation, extra_inputs)
+            all_actions = agent.predict(observation, extra_inputs)
+            # size [1,50,7]
+
+            if self.temporal_agg:
+                self.all_time_actions[[t], t:t + self.t_act] = all_actions
+                actions_for_curr_step = self.all_time_actions[:, t]
+                actions_populated = torch.all(actions_for_curr_step != 0, axis=1)
+                actions_for_curr_step = actions_for_curr_step[actions_populated]
+                k = 0.01
+                exp_weights = np.exp(-k * np.arange(len(actions_for_curr_step)))
+                exp_weights = exp_weights / exp_weights.sum()
+                exp_weights = torch.from_numpy(exp_weights).unsqueeze(dim=1)
+                # exp_weights = torch.from_numpy(exp_weights).cuda().unsqueeze(dim=1)
+                action = (actions_for_curr_step * exp_weights).sum(dim=0, keepdim=True)
+            # else:
+            #     raw_action = all_actions[:, t % query_frequency]
 
             # Remove batch dimension and move to cpu and get numpy array
-            actions = actions.squeeze(0).cpu().numpy()
+            action = action.squeeze(0).cpu().numpy()
 
-            actions = self.denormalize_destandardize_actions(actions)
+            action = self.denormalize_destandardize_actions(action)
 
             if self.relative_action_values:
-                actions += last_desired_absolute_action
-                last_desired_absolute_action += np.sum(actions, axis=0)
+                action += last_desired_absolute_action
+                last_desired_absolute_action += np.sum(action, axis=0)
 
-            for action in actions[: self.t_act]:
-                if action_step_counter >= self.max_action_steps:
-                    break
+            # for action in actions[: self.t_act]:
 
-                # current_pos = self.env.puppet_bot_left.arm.get_ee_pose()
-                # destination = mr.FKinSpace(self.env.puppet_bot_left.arm.robot_des.M, self.env.puppet_bot_left.arm.robot_des.Slist, action[0:6])
+            if action_step_counter >= self.max_action_steps:
+                break
 
-                # Check height (Warning: EEF height not tip of the gripper)
-                # if (height := destination[2, 3]) < 0.05:
-                #     print(f"Warning: Height ({height}) will be too low")
-                #     while True:
-                #         if input("Press enter to continue") == "":
-                #             break
+            # current_pos = self.env.puppet_bot_left.arm.get_ee_pose()
+            # destination = mr.FKinSpace(self.env.puppet_bot_left.arm.robot_des.M, self.env.puppet_bot_left.arm.robot_des.Slist, action[0:6])
 
-                ts = self.env.step(action, move_time_arm=self.move_time_arm, move_time_gripper=self.move_time_gripper)
-                self.update_observation_buffer(ts.observation)
+            # Check height (Warning: EEF height not tip of the gripper)
+            # if (height := destination[2, 3]) < 0.05:
+            #     print(f"Warning: Height ({height}) will be too low")
+            #     while True:
+            #         if input("Press enter to continue") == "":
+            #             break
 
-                action_step_counter += 1
-                progress_bar.update()
+            ts = self.env.step(action, move_time_arm=self.move_time_arm, move_time_gripper=self.move_time_gripper)
+            self.update_observation_buffer(ts.observation)
+
+            action_step_counter += 1
+            progress_bar.update()
 
         # Restore the original weights
         agent.restore_model_weights()
