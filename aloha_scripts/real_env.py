@@ -14,7 +14,7 @@ from constants import PUPPET_GRIPPER_POSITION_NORMALIZE_FN, PUPPET_GRIPPER_VELOC
 from furniture import furniture_factory
 from robot_utils import Recorder, ImageRecorder
 from robot_utils import setup_master_bot, setup_puppet_bot, move_arms, move_grippers
-from utils.frequency import set_frequency
+from utils.frequency import rate_limit
 
 e = IPython.embed
 
@@ -193,7 +193,7 @@ class RealEnv:
             discount=None,
             observation=self.get_observation())
 
-    @set_frequency(1/DT)
+    @rate_limit(1 / DT)
     def step(self, action, move_time_arm=0, move_time_gripper=0):
         """
         Execute one step in the environment.

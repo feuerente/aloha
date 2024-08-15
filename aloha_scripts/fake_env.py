@@ -3,6 +3,9 @@ import collections
 import dm_env
 import numpy as np
 
+from constants import DT
+from utils.frequency import rate_limit
+
 
 class FakeEnv:
     def __init__(
@@ -24,6 +27,7 @@ class FakeEnv:
         self.index = 0
         return self.next_step()
 
+    @rate_limit(1 / DT)
     def step(self, action, move_time_arm, move_time_gripper):
         return self.next_step()
 
