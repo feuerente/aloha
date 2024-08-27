@@ -1,23 +1,63 @@
+import os
+from datetime import datetime
+
+import h5py
+from trajectory_diffusion.utils.helper import deque_to_array
 import math
+import time
 from collections import defaultdict, deque
 from functools import partial
 from typing import List
 
 import numpy as np
 import modern_robotics as mr
+import threading
 import torch
 from scipy.spatial.transform import Rotation as R
 from tqdm import tqdm
 from trajectory_diffusion.datasets.scalers import standardize, normalize, denormalize, destandardize
-from trajectory_diffusion.utils.helper import deque_to_array
 
 from utils.image_transformer import compose_image_transform,adjust_images
 # Use fake_env for testing
-from real_env import make_real_env
-# from fake_env import make_real_env
+# from real_env import make_real_env
+from fake_env import make_real_env
 
 
-# TODO Record trajectory and timing
+pause_rollout = False
+quit_rollout = False
+save_rollout = True
+def check_for_keys():
+    global pause_rollout
+    global quit_rollout
+    global save_rollout
+    print("=====Start rollout=====")
+    print("- [enter] to enter menu")
+    print("=======================")
+    while True:
+        input()  # Wait for enter
+
+        pause_rollout = True
+        print("=====Menu=====")
+        print("- [r] to resume")
+        print("- [s] to quit and save")
+        print("- [q] to quit and NOT SAVE")
+        print("=======================")
+        key = input()
+        if key == 'r':
+            print("=====Rollout resumed=====")
+            pause_rollout = False
+        elif key == 's':
+            print("=====Quitting and saving=====")
+            pause_rollout = False
+            quit_rollout = True
+            save_rollout = True
+        elif key == 'q':
+            print("=====Quitting and NOT SAVING=====")
+            pause_rollout = False
+            quit_rollout = True
+            save_rollout = False
+        else:
+            print("=====Invalid key: Press ENTER====")
 
 class RobotTester:
     def __init__(self, cfg):
@@ -32,10 +72,16 @@ class RobotTester:
         self.t_act = hydra_config["t_act"]
         self.move_time_arm = cfg["move_time_arm"]
         self.move_time_gripper = cfg["move_time_gripper"]
-        self.parts_poses_euler = "parts_poses_euler" in hydra_config["dataset_config"] and \
-                                 hydra_config["dataset_config"]["parts_poses_euler"]
-        self.relative_action_values = "relative_action_values" in hydra_config["agent_config"][
-            "process_batch_config"] and hydra_config["agent_config"]["process_batch_config"]["relative_action_values"]
+
+        self.recording_enable = cfg["recording_enable"]
+        self.recording_name_auto = cfg["recording_name_auto"]
+        self.recording_name = cfg["recording_name"]
+        self.recording_dir = cfg["recording_dir"]
+        self.agent_name = cfg["agent_name"] if "agent_name" in cfg else None
+
+        self.parts_poses_euler = "parts_poses_euler" in hydra_config["dataset_config"] and hydra_config["dataset_config"]["parts_poses_euler"]
+        self.relative_action_values = "relative_action_values" in hydra_config["agent_config"]["process_batch_config"] and hydra_config["agent_config"]["process_batch_config"]["relative_action_values"]
+        self.dt = hydra_config["dataset_config"]["dt"] if "dt" in hydra_config["dataset_config"] else None
         self.normalize_images = hydra_config["dataset_config"].get("normalize_images") if "normalize_images" in hydra_config["dataset_config"] else False
         self.crop_sizes = hydra_config["dataset_config"].get("crop_sizes") if "crop_sizes" in hydra_config["dataset_config"] else []
         self.image_keys = hydra_config["dataset_config"].get("image_keys") if "image_keys" in hydra_config["dataset_config"] else []
@@ -68,7 +114,7 @@ class RobotTester:
         self.image_shapes = {}
         for (i,key) in enumerate(self.image_keys):
             self.image_transforms[key], self.image_shapes[key] = compose_image_transform(start_images, key, self.image_sizes[i], self.crop_sizes[i], self.random_crop[i], self.normalize_images[i])
-    
+
         for key in self.normalize_keys:
             assert key in self.scaler_values, f"Key {key} not found in scaler values."
             for metric in ["min", "max"]:
@@ -83,22 +129,37 @@ class RobotTester:
                     metric] is not None, f"Key {key} does not have {metric} in scaler values."
                 self.scaler_values[key][metric] = np.array(self.scaler_values[key][metric], dtype=np.float32)
 
+        self.prev_action_value = None
+
     def test_agent(self, agent):
         """Run agent on robot"""
         ts = self.env.reset(fake=False)
         last_desired_absolute_action = np.array(self.env.get_reset_action(), dtype=np.float32)[None]
         # Preload observations
         for i in range(self.t_obs):
-            self.update_observation_buffer(ts.observation)
+            self.update_observation_buffer(ts.observation, action=ts.observation["qpos"])
 
         # Set the agent's weights to the EMA weights, without storing and loading them in very call to predict()
         agent.use_ema_weights()
 
+        key_thread = threading.Thread(target=check_for_keys, daemon=True)
+        key_thread.start()
+
         max_action_sequences = math.ceil(self.max_action_steps / self.t_act)
         action_step_counter = 0
+        actual_dt_history = []
+        timesteps = []
+        actions_executed = []
 
         progress_bar = tqdm(total=self.max_action_steps, desc="Testing Agent", unit="action")
         for t in range(self.max_action_steps):
+            while pause_rollout:
+                time.sleep(0.1)
+            if quit_rollout:
+                break
+
+            t_start_prediction = time.time()
+
             observation = deque_to_array(self.observation_buffer)
 
             # Create torch tensors from numpy arrays
@@ -141,8 +202,9 @@ class RobotTester:
                 action += last_desired_absolute_action
                 last_desired_absolute_action += np.sum(action, axis=0)
 
-            # for action in actions[: self.t_act]:
+            t_end_prediction = time.time()
 
+            # for action in actions[: self.t_act]:
             if action_step_counter >= self.max_action_steps:
                 break
 
@@ -156,14 +218,88 @@ class RobotTester:
             #         if input("Press enter to continue") == "":
             #             break
 
+            t_start_step = time.time()
             ts = self.env.step(action, move_time_arm=self.move_time_arm, move_time_gripper=self.move_time_gripper)
+            t_end_step = time.time()
+            timesteps.append(ts)
+            actions_executed.append(action)
             self.update_observation_buffer(ts.observation)
 
             action_step_counter += 1
             progress_bar.update()
 
+            t_end_action_sequence = time.time()
+            actual_dt_history.append([t_start_prediction, t_end_prediction, t_start_step, t_end_step, t_end_action_sequence])
+
+        ####################
+        # Policy rollout done
+        ####################
+
         # Restore the original weights
         agent.restore_model_weights()
+
+        print_dt_diagnosis(actual_dt_history)
+
+        # TODO self.recording_enable
+
+        # Recording path
+        os.makedirs(self.recording_dir, exist_ok=True)
+        if self.recording_name_auto:
+            current_date = datetime.now().strftime("%Y%m%d-%H%M")
+            if not self.agent_name:
+                self.agent_name = agent.__class__.__name__
+            self.recording_name = f"{current_date}__{self.agent_name}"
+        recording_path = os.path.join(self.recording_dir, self.recording_name)
+        while os.path.isfile(recording_path):
+            recording_path = os.path.join(recording_path, "_")
+
+        recording_dict = {
+            '/observations/qpos': [],
+            '/observations/qvel': [],
+            '/observations/effort': [],
+            '/observations/parts_poses': [],
+            '/observations/eef_pose': [],
+            '/action': [],
+        }
+        for cam_name in self.image_keys:
+            recording_dict[f'/observations/images/{cam_name}'] = []
+
+        while actions_executed:
+            action = actions_executed.pop(0)
+            ts = timesteps.pop(0)
+            recording_dict['/observations/qpos'].append(ts.observation['qpos'])
+            recording_dict['/observations/qvel'].append(ts.observation['qvel'])
+            recording_dict['/observations/effort'].append(ts.observation['effort'])
+            recording_dict['/observations/parts_poses'].append(ts.observation['parts_poses'])
+            recording_dict['/observations/eef_pose'].append(ts.observation['eef_pose'])
+            recording_dict['/action'].append(action)
+            for cam_name in self.image_keys:
+                recording_dict[f'/observations/images/{cam_name}'].append(ts.observation['images'][cam_name])
+
+        joint_dim = 7 if self.left_arm_only else 14
+        number_parts = len(recording_dict["/observations/parts_poses"][0]) // 7
+
+        # HDF5
+        t_hdf5_save_start = time.time()
+        with h5py.File(recording_path + '.hdf5', 'w', rdcc_nbytes=1024 ** 2 * 2) as root:
+            root.attrs['sim'] = False
+            obs = root.create_group('observations')
+            image = obs.create_group('images')
+            for cam_name in self.image_keys:
+                _ = image.create_dataset(cam_name, (action_step_counter, 480, 640, 3), dtype='uint8',
+                                         chunks=(1, 480, 640, 3), )
+                # compression='gzip',compression_opts=2,)
+                # compression=32001, compression_opts=(0, 0, 0, 0, 9, 1, 1), shuffle=False)
+            _ = obs.create_dataset('qpos', (action_step_counter, joint_dim))
+            _ = obs.create_dataset('qvel', (action_step_counter, joint_dim))
+            _ = obs.create_dataset('effort', (action_step_counter, joint_dim))
+            _ = obs.create_dataset('parts_poses', (action_step_counter, number_parts * 7))
+            _ = obs.create_dataset('eef_pose', (action_step_counter, 6))
+            _ = root.create_dataset('action', (action_step_counter, joint_dim))
+
+            for name, array in recording_dict.items():
+                root[name][...] = array
+        print(f'Saving: {time.time() - t_hdf5_save_start:.1f} secs')
 
         # TODO
         # return result_dict
@@ -175,13 +311,13 @@ class RobotTester:
             action = destandardize(action, self.scaler_values[key])
         return action
 
-    def update_observation_buffer(self, observation):
+    def update_observation_buffer(self, observation, action):
+        observation["action"] = action
         for key, value in observation.items():
-            if key not in self.keys and not "images":
+            if key not in self.keys and key not in ["images"]:
                 continue
-            
 
-            # TODO adjust images
+            # Adjust images
             # may if key == "images" then loop over all image keys and apply transform
             # depending on that we have to flatten the observations s.t. value["images"][key] --> value[key]
             if key == "images":
@@ -194,97 +330,43 @@ class RobotTester:
             value = np.array(value, dtype=np.float32)
 
             if key == "parts_poses" and self.parts_poses_euler:
-                value = self.parts_poses_to_euler(value)
+                value = parts_poses_to_euler(value)
 
-            
             if key in self.normalize_keys:
                 value = normalize(value, self.scaler_values[key], self.normalize_symmetrically)
             if key in self.standardize_keys:
                 value = standardize(value, self.scaler_values[key])
 
+            if key == "action":
+                if self.prev_action_value is None:
+                    action_vel = np.zeros_like(value)
+                else:
+                    action_vel = (value - self.prev_action_value) / self.dt
+
+                self.prev_action_value = value
+                self.observation_buffer['action_vel'].append(action_vel)
+
             self.observation_buffer[key].append(value)
 
-    def parts_poses_to_euler(self, parts_poses):
-        out_parts_poses = []
-        for part_pose in parts_poses.reshape(-1, 7):
-            quaternion = part_pose[3:7]
-            euler_angle = R.from_quat(quaternion).as_euler('xyz', degrees=False)
-            out_parts_poses.append(np.concatenate((part_pose[:3], euler_angle)))
-        return np.hstack(out_parts_poses, dtype=np.float32)
- 
-# def adjust_images(observation):
-#     # takes all images from the observation and transforms it to the correct shape, i.e. (#images, channels, ...)
-#     # for key in observations: #use key images on real stuff ['images']
-#     #     observations[key] = np.moveaxis(observations[key],-1,1) #dont forgetkey images
-#
-#     # for cam_name in camera_names:
-#     #     observation['images'][cam_name] = np.moveaxis(observation['images'][cam_name],-1,0)[...,:CROP_SIZES[0],:CROP_SIZES[1]]
-#     # TODO normalize pixels to [0,1] by dividing by 255
-#     for key, value in observation.items():
-#         if key == 'images':
-#             # for cam_name in IMAGE_KEYS:
-#             #     observation[key][cam_name] = torch.tensor(value[cam_name])[...]
-#             continue
-#         observation[key] = torch.tensor(value, dtype=torch.float32)[...]
-#     # for cam_name in IMAGE_KEYS:
-#     #     observation['images'][cam_name] = observation['images'][cam_name].type(torch.FloatTensor)
-#     return observation
+def parts_poses_to_euler(parts_poses):
+    out_parts_poses = []
+    for part_pose in parts_poses.reshape(-1, 7):
+        quaternion = part_pose[3:7]
+        euler_angle = R.from_quat(quaternion).as_euler('xyz', degrees=False)
+        out_parts_poses.append(np.concatenate((part_pose[:3], euler_angle)))
+    return np.hstack(out_parts_poses, dtype=np.float32)
 
+def print_dt_diagnosis(actual_dt_history):
+    # prediction time
+    # step time
+    # step frequency
+    actual_dt_history = np.array(actual_dt_history)
+    prediction_time = actual_dt_history[:, 1] - actual_dt_history[:, 0]
+    step_env_time = actual_dt_history[:, 3] - actual_dt_history[:, 2]
+    total_time = actual_dt_history[:, 4] - actual_dt_history[:, 0]
 
-# def get_auto_index(dataset_dir, dataset_name_prefix='', data_suffix='hdf5'):
-#     max_idx = 1000
-#     if not os.path.isdir(dataset_dir):
-#         os.makedirs(dataset_dir)
-#     for i in range(max_idx + 1):
-#         if not os.path.isfile(os.path.join(dataset_dir, f'{dataset_name_prefix}episode_{i}.{data_suffix}')):
-#             return i
-#     raise Exception(f"Error getting auto index, or more than {max_idx} episodes")
-#
-#
-
-
-# # save the data
-# data_dict = {
-#     '/observations/qpos': [],
-#     '/observations/qvel': [],
-#     '/observations/effort': [],
-#     '/observations/parts_poses': [],
-#     '/action': [],
-
-# }
-# for cam_name in CAMERA_NAMES:
-#     data_dict[f'/observations/images/{cam_name}'] = []
-
-# # len(action): max_timesteps, len(time_steps): max_timesteps + 1
-# while actions:
-#     action = actions.pop(0)
-#     ts = timesteps.pop(0)
-#     data_dict['/observations/qpos'].append(ts['qpos'])
-#     data_dict['/observations/qvel'].append(ts['qvel'])
-#     data_dict['/observations/effort'].append(ts['effort'])
-#     data_dict['/observations/parts_poses'].append(ts['parts_poses'])
-#     data_dict['/action'].append(action)
-#     for cam_name in CAMERA_NAMES:
-#         data_dict[f'/observations/images/{cam_name}'].append(ts['images'][cam_name])
-
-# # HDF5
-# t0 = time.time()
-# index = get_auto_index(DATASET_DIR)
-# dataset_path = DATASET_DIR + f'episode_{index}'
-# with h5py.File(dataset_path + '.hdf5', 'w', rdcc_nbytes=1024 ** 2 * 2) as root:
-#     root.attrs['sim'] = False
-#     obs = root.create_group('observations')
-#     image = obs.create_group('images')
-#     for cam_name in CAMERA_NAMES:
-#         _ = image.create_dataset(cam_name, (MAX_TIMESTEPS, 480, 640, 3), dtype='uint8',
-#                                  chunks=(1, 480, 640, 3), )
-#     number_joints = 7 if HALVED_POLICY else 14
-#     _ = obs.create_dataset('qpos', (MAX_TIMESTEPS, number_joints))
-#     _ = obs.create_dataset('qvel', (MAX_TIMESTEPS, number_joints))
-#     _ = obs.create_dataset('effort', (MAX_TIMESTEPS, number_joints))
-#     _ = obs.create_dataset('parts_poses', (MAX_TIMESTEPS, 7))
-#     _ = root.create_dataset('action', (MAX_TIMESTEPS, number_joints))
-
-#     for name, array in data_dict.items():
-#         root[name][...] = array
-# print(f'Saving: {time.time() - t0:.1f} secs')
+    dt_mean = np.mean(total_time)
+    dt_std = np.std(total_time)
+    freq_mean = 1 / dt_mean
+    print(f'Avg freq: {freq_mean:.2f} Prediction: {np.mean(prediction_time):.3f} Step env: {np.mean(step_env_time):.3f}')
+    return freq_mean
