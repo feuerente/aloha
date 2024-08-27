@@ -78,10 +78,9 @@ class RobotTester:
         self.recording_dir = cfg["recording_dir"]
         self.agent_name = cfg["agent_name"] if "agent_name" in cfg else None
 
-        self.parts_poses_euler = "parts_poses_euler" in hydra_config["dataset_config"] and \
-                                 hydra_config["dataset_config"]["parts_poses_euler"]
-        self.relative_action_values = "relative_action_values" in hydra_config["agent_config"][
-            "process_batch_config"] and hydra_config["agent_config"]["process_batch_config"]["relative_action_values"]
+        self.parts_poses_euler = "parts_poses_euler" in hydra_config["dataset_config"] and hydra_config["dataset_config"]["parts_poses_euler"]
+        self.relative_action_values = "relative_action_values" in hydra_config["agent_config"]["process_batch_config"] and hydra_config["agent_config"]["process_batch_config"]["relative_action_values"]
+        self.dt = hydra_config["dataset_config"]["dt"] if "dt" in hydra_config["dataset_config"] else None
         self.normalize_images = hydra_config["dataset_config"].get("normalize_images") if "normalize_images" in hydra_config["dataset_config"] else False
         self.crop_sizes = hydra_config["dataset_config"].get("crop_sizes") if "crop_sizes" in hydra_config["dataset_config"] else []
         self.image_keys = hydra_config["dataset_config"].get("image_keys") if "image_keys" in hydra_config["dataset_config"] else []
@@ -124,13 +123,15 @@ class RobotTester:
                     metric] is not None, f"Key {key} does not have {metric} in scaler values."
                 self.scaler_values[key][metric] = np.array(self.scaler_values[key][metric], dtype=np.float32)
 
+        self.prev_action_value = None
+
     def test_agent(self, agent):
         """Run agent on robot"""
         ts = self.env.reset(fake=False)
         last_desired_absolute_action = np.array(self.env.get_reset_action(), dtype=np.float32)[None]
         # Preload observations
         for i in range(self.t_obs):
-            self.update_observation_buffer(ts.observation)
+            self.update_observation_buffer(ts.observation, action=ts.observation["qpos"])
 
         # Set the agent's weights to the EMA weights, without storing and loading them in very call to predict()
         agent.use_ema_weights()
@@ -289,8 +290,8 @@ class RobotTester:
             action = destandardize(action, self.scaler_values[key])
         return action
 
-    def update_observation_buffer(self, observation, action=None):
-        qpos = None
+    def update_observation_buffer(self, observation, action):
+        observation["action"] = action
         for key, value in observation.items():
             if key not in self.keys and key not in ["images"]:
                 continue
@@ -315,18 +316,16 @@ class RobotTester:
             if key in self.standardize_keys:
                 value = standardize(value, self.scaler_values[key])
 
-            if key == "qpos":
-               qpos = value
+            if key == "action":
+                if self.prev_action_value is None:
+                    action_vel = np.zeros_like(value)
+                else:
+                    action_vel = (value - self.prev_action_value) / self.dt
+
+                self.prev_action_value = value
+                self.observation_buffer['action_vel'].append(action_vel)
 
             self.observation_buffer[key].append(value)
-
-        if action is not None:
-            self.observation_buffer['action'].append(action)
-        else:
-            if qpos is not None:
-                self.observation_buffer['action'].append(qpos)
-            else:
-                raise Exception("observation_buffer: action and qpos are None")
 
 def parts_poses_to_euler(parts_poses):
     out_parts_poses = []
