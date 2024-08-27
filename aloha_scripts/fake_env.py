@@ -55,6 +55,7 @@ class FakeEnv:
         obs['images'] = {}
         # obs['images']['cam_low'] = self.cam_low[self.index]
         obs['parts_poses'] = self.parts_poses[self.index]
+        obs['eef_pose'] = [1] * self.left_arm_only
         self.index = self.index + 1
         return obs
 
