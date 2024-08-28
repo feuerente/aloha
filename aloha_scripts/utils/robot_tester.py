@@ -136,6 +136,7 @@ class RobotTester:
                 self.scaler_values[key][metric] = np.array(self.scaler_values[key][metric], dtype=np.float32)
 
         self.prev_action_value = None
+        self.freq_mean = None
 
     def test_agent(self, agent):
         """Run agent on robot"""
@@ -240,7 +241,7 @@ class RobotTester:
         # Restore the original weights
         agent.restore_model_weights()
 
-        print_dt_diagnosis(actual_dt_history)
+        self.print_dt_diagnosis(actual_dt_history)
 
         # TODO self.recording_enable
 
@@ -301,10 +302,25 @@ class RobotTester:
 
             for name, array in recording_dict.items():
                 root[name][...] = array
+
+            root.attrs['prediction_frequency'] = self.freq_mean
+
         print(f'Saving: {time.time() - t_hdf5_save_start:.1f} secs')
 
         # TODO
         # return result_dict
+
+    def print_dt_diagnosis(self, actual_dt_history):
+        # [t_start_action_step, t_start_prediction, t_end_prediction, t_start_step, t_end_step, t_end_action_step])
+        actual_dt_history = np.array(actual_dt_history)
+        prediction_time = actual_dt_history[:, 2] - actual_dt_history[:, 1]
+        step_env_time = actual_dt_history[:, 4] - actual_dt_history[:, 3]
+        total_time = actual_dt_history[:, 5] - actual_dt_history[:, 0]
+
+        dt_mean = np.mean(total_time)
+        dt_std = np.std(total_time)
+        self.freq_mean = 1 / dt_mean
+        print(f'Avg freq: {self.freq_mean:.2f} Prediction: {np.mean(prediction_time):.3f} Step env: {np.mean(step_env_time):.3f}')
 
     def denormalize_destandardize_actions(self, action: np.ndarray) -> np.ndarray:
         if (key := "action") in self.normalize_keys:
@@ -357,16 +373,3 @@ def parts_poses_to_euler(parts_poses):
         euler_angle = R.from_quat(quaternion).as_euler('xyz', degrees=False)
         out_parts_poses.append(np.concatenate((part_pose[:3], euler_angle)))
     return np.hstack(out_parts_poses, dtype=np.float32)
-
-def print_dt_diagnosis(actual_dt_history):
-    # [t_start_action_step, t_start_prediction, t_end_prediction, t_start_step, t_end_step, t_end_action_step])
-    actual_dt_history = np.array(actual_dt_history)
-    prediction_time = actual_dt_history[:, 2] - actual_dt_history[:, 1]
-    step_env_time = actual_dt_history[:, 4] - actual_dt_history[:, 3]
-    total_time = actual_dt_history[:, 5] - actual_dt_history[:, 0]
-
-    dt_mean = np.mean(total_time)
-    dt_std = np.std(total_time)
-    freq_mean = 1 / dt_mean
-    print(f'Avg freq: {freq_mean:.2f} Prediction: {np.mean(prediction_time):.3f} Step env: {np.mean(step_env_time):.3f}')
-    return freq_mean

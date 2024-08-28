@@ -32,6 +32,9 @@ def load_hdf5(dataset_dir, dataset_name):
         for cam_name in root[f'/observations/images/'].keys():
             image_dict[cam_name] = root[f'/observations/images/{cam_name}'][()]
 
+        prediction_frequency = root.attrs['prediction_frequency']
+        print(f"prediction_freq: {prediction_frequency}")
+
     return qpos, qvel, effort, action, parts_poses, image_dict
 
 
