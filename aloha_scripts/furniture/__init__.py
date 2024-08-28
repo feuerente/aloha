@@ -1,11 +1,14 @@
 from furniture.furniture import Furniture
 from furniture.square_table import SquareTable
+from furniture.square_table_oneleg import SquareTableOneLeg
 from furniture.table_leg import TableLeg
 
 
 def furniture_factory(furniture: str) -> Furniture:
     if furniture == "square_table":
         return SquareTable()
+    if furniture == "square_table_oneleg":
+        return SquareTableOneLeg()
     if furniture == "table_leg":
         return TableLeg()
     # elif furniture == "desk":
