@@ -70,8 +70,10 @@ class RobotTester:
         self.action_dim = 7 if self.left_arm_only else 14
         self.t_obs = hydra_config["t_obs"]
         self.t_act = hydra_config["t_act"]
+        self.device = hydra_config["device"]
         self.move_time_arm = cfg["move_time_arm"]
         self.move_time_gripper = cfg["move_time_gripper"]
+        self.temporal_agg = cfg["temporal_agg"]
 
         self.recording_enable = cfg["recording_enable"]
         self.recording_name_auto = cfg["recording_name_auto"]
@@ -90,10 +92,14 @@ class RobotTester:
         self.pad_start = hydra_config["dataset_config"].get("pad_start") if "pad_start" in hydra_config["dataset_config"] else 0
         self.pad_end = hydra_config["dataset_config"].get("pad_end") if "pad_end" in hydra_config["dataset_config"] else 0
 
-        self.temporal_agg = True
         if self.temporal_agg:
-            self.all_time_actions = torch.zeros([self.max_action_steps, self.max_action_steps + self.t_act, self.action_dim])
-            # self.all_time_actions = torch.zeros([self.max_action_steps, self.max_action_steps + self.t_act, self.action_dim]).cuda()
+            self.query_frequency = 1
+            if self.device == "cpu":
+                self.all_time_actions = torch.zeros([self.max_action_steps, self.max_action_steps + self.t_act, self.action_dim])
+            else:
+                self.all_time_actions = torch.zeros([self.max_action_steps, self.max_action_steps + self.t_act, self.action_dim]).cuda()
+        else:
+            self.query_frequency = self.t_act
 
         self.env = make_real_env(init_node=True, furniture="table_leg", setup_robots=True,
                                  left_arm_only=self.left_arm_only)
@@ -145,27 +151,25 @@ class RobotTester:
         key_thread = threading.Thread(target=check_for_keys, daemon=True)
         key_thread.start()
 
-        max_action_sequences = math.ceil(self.max_action_steps / self.t_act)
-        action_step_counter = 0
+        action_step = 0
         actual_dt_history = []
         timesteps = []
         actions_executed = []
 
         progress_bar = tqdm(total=self.max_action_steps, desc="Testing Agent", unit="action")
-        for t in range(self.max_action_steps):
+        action_step = 0
+        while action_step < self.max_action_steps:
             while pause_rollout:
                 time.sleep(0.1)
             if quit_rollout:
                 break
 
-            t_start_prediction = time.time()
-
+            t_start_action_step = time.time()
             observation = deque_to_array(self.observation_buffer)
 
             # Create torch tensors from numpy arrays
             for key, val in observation.items():
                 observation[key] = torch.from_numpy(val)
-
             observation, extra_inputs = agent.process_batch.process_env_observation(observation)
 
             # Move observations and extra inputs to device
@@ -176,22 +180,25 @@ class RobotTester:
                     extra_inputs[key] = val.to(agent.device)
 
             # Predict the next action sequence
-            all_actions = agent.predict(observation, extra_inputs)
-            # size [1,50,7]
-
+            if action_step % self.query_frequency == 0:
+                t_start_prediction = time.time()
+                all_actions = agent.predict(observation, extra_inputs)
+                t_end_prediction = time.time()
             if self.temporal_agg:
-                self.all_time_actions[[t], t:t + self.t_act] = all_actions
-                actions_for_curr_step = self.all_time_actions[:, t]
+                self.all_time_actions[[action_step], action_step:action_step + self.t_act] = all_actions
+                actions_for_curr_step = self.all_time_actions[:, action_step]
                 actions_populated = torch.all(actions_for_curr_step != 0, axis=1)
                 actions_for_curr_step = actions_for_curr_step[actions_populated]
                 k = 0.01
                 exp_weights = np.exp(-k * np.arange(len(actions_for_curr_step)))
                 exp_weights = exp_weights / exp_weights.sum()
-                exp_weights = torch.from_numpy(exp_weights).unsqueeze(dim=1)
-                # exp_weights = torch.from_numpy(exp_weights).cuda().unsqueeze(dim=1)
+                if self.device == "cpu":
+                    exp_weights = torch.from_numpy(exp_weights).unsqueeze(dim=1)
+                else:
+                    exp_weights = torch.from_numpy(exp_weights).cuda().unsqueeze(dim=1)
                 action = (actions_for_curr_step * exp_weights).sum(dim=0, keepdim=True)
-            # else:
-            #     raw_action = all_actions[:, t % query_frequency]
+            else:
+                action = all_actions[:, action_step % self.query_frequency]
 
             # Remove batch dimension and move to cpu and get numpy array
             action = action.squeeze(0).cpu().numpy()
@@ -201,12 +208,6 @@ class RobotTester:
             if self.relative_action_values:
                 action += last_desired_absolute_action
                 last_desired_absolute_action += np.sum(action, axis=0)
-
-            t_end_prediction = time.time()
-
-            # for action in actions[: self.t_act]:
-            if action_step_counter >= self.max_action_steps:
-                break
 
             # current_pos = self.env.puppet_bot_left.arm.get_ee_pose()
             # destination = mr.FKinSpace(self.env.puppet_bot_left.arm.robot_des.M, self.env.puppet_bot_left.arm.robot_des.Slist, action[0:6])
@@ -221,15 +222,16 @@ class RobotTester:
             t_start_step = time.time()
             ts = self.env.step(action, move_time_arm=self.move_time_arm, move_time_gripper=self.move_time_gripper)
             t_end_step = time.time()
+
             timesteps.append(ts)
             actions_executed.append(action)
-            self.update_observation_buffer(ts.observation)
+            self.update_observation_buffer(ts.observation, action)
 
-            action_step_counter += 1
+            t_end_action_step = time.time()
+            actual_dt_history.append([t_start_action_step, t_start_prediction, t_end_prediction, t_start_step, t_end_step, t_end_action_step])
+
+            action_step += 1
             progress_bar.update()
-
-            t_end_action_sequence = time.time()
-            actual_dt_history.append([t_start_prediction, t_end_prediction, t_start_step, t_end_step, t_end_action_sequence])
 
         ####################
         # Policy rollout done
@@ -286,16 +288,16 @@ class RobotTester:
             obs = root.create_group('observations')
             image = obs.create_group('images')
             for cam_name in self.image_keys:
-                _ = image.create_dataset(cam_name, (action_step_counter, 480, 640, 3), dtype='uint8',
+                _ = image.create_dataset(cam_name, (action_step, 480, 640, 3), dtype='uint8',
                                          chunks=(1, 480, 640, 3), )
                 # compression='gzip',compression_opts=2,)
                 # compression=32001, compression_opts=(0, 0, 0, 0, 9, 1, 1), shuffle=False)
-            _ = obs.create_dataset('qpos', (action_step_counter, joint_dim))
-            _ = obs.create_dataset('qvel', (action_step_counter, joint_dim))
-            _ = obs.create_dataset('effort', (action_step_counter, joint_dim))
-            _ = obs.create_dataset('parts_poses', (action_step_counter, number_parts * 7))
-            _ = obs.create_dataset('eef_pose', (action_step_counter, 6))
-            _ = root.create_dataset('action', (action_step_counter, joint_dim))
+            _ = obs.create_dataset('qpos', (action_step, joint_dim))
+            _ = obs.create_dataset('qvel', (action_step, joint_dim))
+            _ = obs.create_dataset('effort', (action_step, joint_dim))
+            _ = obs.create_dataset('parts_poses', (action_step, number_parts * 7))
+            _ = obs.create_dataset('eef_pose', (action_step, 6))
+            _ = root.create_dataset('action', (action_step, joint_dim))
 
             for name, array in recording_dict.items():
                 root[name][...] = array
@@ -357,13 +359,11 @@ def parts_poses_to_euler(parts_poses):
     return np.hstack(out_parts_poses, dtype=np.float32)
 
 def print_dt_diagnosis(actual_dt_history):
-    # prediction time
-    # step time
-    # step frequency
+    # [t_start_action_step, t_start_prediction, t_end_prediction, t_start_step, t_end_step, t_end_action_step])
     actual_dt_history = np.array(actual_dt_history)
-    prediction_time = actual_dt_history[:, 1] - actual_dt_history[:, 0]
-    step_env_time = actual_dt_history[:, 3] - actual_dt_history[:, 2]
-    total_time = actual_dt_history[:, 4] - actual_dt_history[:, 0]
+    prediction_time = actual_dt_history[:, 2] - actual_dt_history[:, 1]
+    step_env_time = actual_dt_history[:, 4] - actual_dt_history[:, 3]
+    total_time = actual_dt_history[:, 5] - actual_dt_history[:, 0]
 
     dt_mean = np.mean(total_time)
     dt_std = np.std(total_time)
