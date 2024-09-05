@@ -72,7 +72,8 @@ def capture_one_episode(dt, max_timesteps, camera_names, dataset_dir, dataset_na
                                               robot_name=f'master_left', init_node=True)
     master_bot_right = InterbotixManipulatorXS(robot_model="wx250s", group_name="arm", gripper_name="gripper",
                                                robot_name=f'master_right', init_node=False)
-    env = make_real_env(init_node=False, furniture="table_leg", setup_robots=False)
+    # env = make_real_env(init_node=False, furniture="table_leg", setup_robots=False)
+    env = make_real_env(init_node=False, furniture="square_table_oneleg", setup_robots=False, left_arm_only=True)
 
     # saving dataset
     if not os.path.isdir(dataset_dir):
@@ -144,7 +145,7 @@ def capture_one_episode(dt, max_timesteps, camera_names, dataset_dir, dataset_na
         data_dict['/observations/effort'].append(ts.observation['effort'])
         data_dict['/observations/parts_poses'].append(ts.observation['parts_poses'])
         data_dict['/observations/eef_pose'].append(ts.observation['eef_pose'])
-        data_dict['/action'].append(action)
+        data_dict['/action'].append(action[:7]) # TODO fix
         for cam_name in camera_names:
             data_dict[f'/observations/images/{cam_name}'].append(ts.observation['images'][cam_name])
 
@@ -159,12 +160,12 @@ def capture_one_episode(dt, max_timesteps, camera_names, dataset_dir, dataset_na
                                      chunks=(1, 480, 640, 3), )
             # compression='gzip',compression_opts=2,)
             # compression=32001, compression_opts=(0, 0, 0, 0, 9, 1, 1), shuffle=False)
-        _ = obs.create_dataset('qpos', (max_timesteps, 14))
-        _ = obs.create_dataset('qvel', (max_timesteps, 14))
-        _ = obs.create_dataset('effort', (max_timesteps, 14))
-        _ = obs.create_dataset('parts_poses', (max_timesteps, 7))
+        _ = obs.create_dataset('qpos', (max_timesteps, 7))
+        _ = obs.create_dataset('qvel', (max_timesteps, 7))
+        _ = obs.create_dataset('effort', (max_timesteps, 7))
+        _ = obs.create_dataset('parts_poses', (max_timesteps, 14)) # TODO fix
         _ = obs.create_dataset('eef_pose', (max_timesteps, 6))
-        _ = root.create_dataset('action', (max_timesteps, 14))
+        _ = root.create_dataset('action', (max_timesteps, 7))
 
         for name, array in data_dict.items():
             root[name][...] = array

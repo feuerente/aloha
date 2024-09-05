@@ -1,6 +1,6 @@
 import sys
 from interbotix_xs_modules.arm import InterbotixManipulatorXS
-from robot_utils import move_arms, torque_on
+from robot_utils import move_arms, move_grippers, torque_on
 
 
 def sleep(side):
@@ -19,6 +19,8 @@ def sleep(side):
     )
 
     torque_on(puppet_bot)
+
+    move_grippers([puppet_bot], [1], move_time=1)
 
     move_arms([puppet_bot], [sleep_position] * 2, move_time=2)
     move_arms([puppet_bot], [rest_position] * 2, move_time=1)

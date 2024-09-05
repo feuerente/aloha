@@ -3,7 +3,7 @@ from typing import Dict, Any
 
 from utils.pose import get_mat
 
-DATA_DIR = 'data'
+DATA_DIR = '/media/hdd/group1_dataset'
 TASK_CONFIGS = {
     'aloha_wear_shoe':{
         'dataset_dir': DATA_DIR + '/aloha_wear_shoe',
@@ -14,8 +14,8 @@ TASK_CONFIGS = {
     'aloha_furniture':{
         'dataset_dir': DATA_DIR + '/aloha_furniture',
         'num_episodes': 50,
-        'episode_len': 1200,
-        'camera_names': []
+        'episode_len': 2000,
+        'camera_names': ['cam_low', 'cam_left_wrist']
     },
 }
 
@@ -62,6 +62,14 @@ config: Dict[str, Any] = {
             "intr_param": [635.6, 637.4, 311.6, 231.5],
         },
         "cam_high": {
+            # Camera parameters fx, fy, cx, cy
+            "intr_param": [635.6, 637.4, 311.6, 231.5],
+        },
+        "cam_left_wrist": {
+            # Camera parameters fx, fy, cx, cy
+            "intr_param": [635.6, 637.4, 311.6, 231.5],
+        },
+        "cam_right_wrist": {
             # Camera parameters fx, fy, cx, cy
             "intr_param": [635.6, 637.4, 311.6, 231.5],
         },

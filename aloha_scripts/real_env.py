@@ -89,7 +89,7 @@ class RealEnv:
         eef_poses = []
         for qpos_arm in qpos.reshape(-1, 7):
             eef_pose_matrix = mr.FKinSpace(self.puppet_bot_left.arm.robot_des.M,
-                                           self.puppet_bot_left.arm.robot_des.Slist, qpos_arm)
+                                           self.puppet_bot_left.arm.robot_des.Slist, qpos_arm[:6])
 
             translation = eef_pose_matrix[:3, 3]
             rotation_matrix = eef_pose_matrix[:3, :3]
@@ -227,7 +227,7 @@ class RealEnv:
 
         if not self.left_arm_only:
             right_action = action[state_len:]
-            move_arms(self.puppet_bot_right, right_action[:6], move_time_arm)
+            move_arms([self.puppet_bot_right], [right_action[:6]], move_time_arm)
             move_grippers([self.puppet_bot_right], [right_action[-1]], move_time_gripper, normalize=True)
 
         return dm_env.TimeStep(

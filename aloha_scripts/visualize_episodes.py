@@ -51,6 +51,7 @@ def main(args):
         episode_path = os.path.join(dataset_dir, dataset_name)
 
     qpos, qvel, effort, action, parts_poses, image_dict = load_hdf5(episode_path)
+    print(f"episode_length: {qpos.shape}")
     save_videos(image_dict, DT, video_path=f"{episode_path}_video.mp4")
     visualize_joints(qpos, action, plot_path=f"{episode_path}_qpos.png")
     visualize_single(qvel, 'qvel', plot_path=f"{episode_path}_qvel.png")
@@ -175,6 +176,7 @@ def visualize_parts_poses(parts_poses_list, label, plot_path=None, ylim=None, la
 
     # plot joint state
     dim_names = ["x", "y", "z", "qw", "qx", "qy", "qz"] * num_parts
+
     for dim_idx in range(num_dim):
         ax = axs[dim_idx]
         ax.plot(parts_poses[:, dim_idx], label=label)

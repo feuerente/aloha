@@ -20,8 +20,8 @@ from trajectory_diffusion.datasets.scalers import standardize, normalize, denorm
 
 from utils.image_transformer import compose_image_transform,adjust_images
 # Use fake_env for testing
-# from real_env import make_real_env
-from fake_env import make_real_env
+from real_env import make_real_env
+# from fake_env import make_real_env
 
 
 pause_rollout = False
@@ -104,8 +104,8 @@ class RobotTester:
         else:
             self.query_frequency = self.t_act
 
-        self.env = make_real_env(init_node=True, furniture="table_leg", setup_robots=True,
-                                 left_arm_only=self.left_arm_only)
+        #self.env = make_real_env(init_node=True, furniture="table_leg", setup_robots=True, left_arm_only=self.left_arm_only)
+        self.env = make_real_env(init_node=True, furniture="square_table_oneleg", setup_robots=True, left_arm_only=self.left_arm_only)
 
         self.observation_buffer = defaultdict(partial(deque, maxlen=self.t_obs))
 
@@ -343,7 +343,8 @@ class RobotTester:
             recording_dict['/action'].append(action)
             if self.recording_cams:
                 for cam_name in self.image_keys:
-                    recording_dict[f'/observations/images/{cam_name}'].append(ts.observation['images'][cam_name])
+                    recording_dict[f'/observations/images/{cam_name}'].append(np.moveaxis(ts.observation['images'][cam_name], 0, -1))
+
 
         joint_dim = 7 if self.left_arm_only else 14
         number_parts = len(recording_dict["/observations/parts_poses"][0]) // 7
@@ -383,6 +384,7 @@ def parts_poses_to_euler(parts_poses):
     out_parts_poses = []
     for part_pose in parts_poses.reshape(-1, 7):
         quaternion = part_pose[3:7]
+
         euler_angle = R.from_quat(quaternion).as_euler('xyz', degrees=False)
         out_parts_poses.append(np.concatenate((part_pose[:3], euler_angle)))
     return np.hstack(out_parts_poses, dtype=np.float32)
