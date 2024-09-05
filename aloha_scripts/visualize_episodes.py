@@ -32,8 +32,11 @@ def load_hdf5(episode_path):
         for cam_name in root[f'/observations/images/'].keys():
             image_dict[cam_name] = root[f'/observations/images/{cam_name}'][()]
 
-        prediction_frequency = root.attrs['prediction_frequency']
-        print(f"prediction_freq: {prediction_frequency}")
+        if (prediction_frequency := root.attrs.get('prediction_frequency')) is not None:
+            print(f"prediction_freq: {prediction_frequency:.2f}")
+
+        if (cfg := root.attrs.get('cfg')) is not None:
+            print(f"cfg: {cfg}")
 
     return qpos, qvel, effort, action, parts_poses, image_dict
 

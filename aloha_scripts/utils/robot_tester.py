@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 
 import h5py
+import json
 from trajectory_diffusion.utils.helper import deque_to_array
 import math
 import time
@@ -61,6 +62,7 @@ def check_for_keys():
 
 class RobotTester:
     def __init__(self, cfg):
+        self.cfg = cfg
         hydra_config = cfg["hydra_config"]
         dataset_config = hydra_config["dataset_config"]
 
@@ -76,6 +78,7 @@ class RobotTester:
         self.temporal_agg = cfg["temporal_agg"]
 
         self.recording_enable = cfg["recording_enable"]
+        self.recording_cams = cfg["recording_cams"]
         self.recording_name_auto = cfg["recording_name_auto"]
         self.recording_name = cfg["recording_name"]
         self.recording_dir = cfg["recording_dir"]
@@ -243,69 +246,8 @@ class RobotTester:
 
         self.print_dt_diagnosis(actual_dt_history)
 
-        # TODO self.recording_enable
-
-        # Recording path
-        os.makedirs(self.recording_dir, exist_ok=True)
-        if self.recording_name_auto:
-            current_date = datetime.now().strftime("%Y%m%d-%H%M")
-            if not self.agent_name:
-                self.agent_name = agent.__class__.__name__
-            self.recording_name = f"{current_date}__{self.agent_name}"
-        recording_path = os.path.join(self.recording_dir, self.recording_name)
-        while os.path.isfile(recording_path):
-            recording_path = os.path.join(recording_path, "_")
-
-        recording_dict = {
-            '/observations/qpos': [],
-            '/observations/qvel': [],
-            '/observations/effort': [],
-            '/observations/parts_poses': [],
-            '/observations/eef_pose': [],
-            '/action': [],
-        }
-        for cam_name in self.image_keys:
-            recording_dict[f'/observations/images/{cam_name}'] = []
-
-        while actions_executed:
-            action = actions_executed.pop(0)
-            ts = timesteps.pop(0)
-            recording_dict['/observations/qpos'].append(ts.observation['qpos'])
-            recording_dict['/observations/qvel'].append(ts.observation['qvel'])
-            recording_dict['/observations/effort'].append(ts.observation['effort'])
-            recording_dict['/observations/parts_poses'].append(ts.observation['parts_poses'])
-            recording_dict['/observations/eef_pose'].append(ts.observation['eef_pose'])
-            recording_dict['/action'].append(action)
-            for cam_name in self.image_keys:
-                recording_dict[f'/observations/images/{cam_name}'].append(ts.observation['images'][cam_name])
-
-        joint_dim = 7 if self.left_arm_only else 14
-        number_parts = len(recording_dict["/observations/parts_poses"][0]) // 7
-
-        # HDF5
-        t_hdf5_save_start = time.time()
-        with h5py.File(recording_path + '.hdf5', 'w', rdcc_nbytes=1024 ** 2 * 2) as root:
-            root.attrs['sim'] = False
-            obs = root.create_group('observations')
-            image = obs.create_group('images')
-            for cam_name in self.image_keys:
-                _ = image.create_dataset(cam_name, (action_step, 480, 640, 3), dtype='uint8',
-                                         chunks=(1, 480, 640, 3), )
-                # compression='gzip',compression_opts=2,)
-                # compression=32001, compression_opts=(0, 0, 0, 0, 9, 1, 1), shuffle=False)
-            _ = obs.create_dataset('qpos', (action_step, joint_dim))
-            _ = obs.create_dataset('qvel', (action_step, joint_dim))
-            _ = obs.create_dataset('effort', (action_step, joint_dim))
-            _ = obs.create_dataset('parts_poses', (action_step, number_parts * 7))
-            _ = obs.create_dataset('eef_pose', (action_step, 6))
-            _ = root.create_dataset('action', (action_step, joint_dim))
-
-            for name, array in recording_dict.items():
-                root[name][...] = array
-
-            root.attrs['prediction_frequency'] = self.freq_mean
-
-        print(f'Saving: {time.time() - t_hdf5_save_start:.1f} secs')
+        if self.recording_enable:
+            self.save_recording(actions_executed, timesteps, action_step)
 
         # TODO
         # return result_dict
@@ -365,6 +307,77 @@ class RobotTester:
                 self.observation_buffer['action_vel'].append(action_vel)
 
             self.observation_buffer[key].append(value)
+
+    def save_recording(self, actions_executed, timesteps, action_step):
+        # Recording path
+        os.makedirs(self.recording_dir, exist_ok=True)
+        if self.recording_name_auto:
+            current_date = datetime.now().strftime("%Y%m%d-%H%M")
+            if not self.agent_name:
+                self.agent_name = agent.__class__.__name__
+            self.recording_name = f"{current_date}__{self.agent_name}"
+        recording_path = os.path.join(self.recording_dir, self.recording_name)
+        while os.path.isfile(recording_path):
+            recording_path = os.path.join(recording_path, "_")
+
+        recording_dict = {
+            '/observations/qpos': [],
+            '/observations/qvel': [],
+            '/observations/effort': [],
+            '/observations/parts_poses': [],
+            '/observations/eef_pose': [],
+            '/action': [],
+        }
+        if self.recording_cams:
+            for cam_name in self.image_keys:
+                recording_dict[f'/observations/images/{cam_name}'] = []
+
+        while actions_executed:
+            action = actions_executed.pop(0)
+            ts = timesteps.pop(0)
+            recording_dict['/observations/qpos'].append(ts.observation['qpos'])
+            recording_dict['/observations/qvel'].append(ts.observation['qvel'])
+            recording_dict['/observations/effort'].append(ts.observation['effort'])
+            recording_dict['/observations/parts_poses'].append(ts.observation['parts_poses'])
+            recording_dict['/observations/eef_pose'].append(ts.observation['eef_pose'])
+            recording_dict['/action'].append(action)
+            if self.recording_cams:
+                for cam_name in self.image_keys:
+                    recording_dict[f'/observations/images/{cam_name}'].append(ts.observation['images'][cam_name])
+
+        joint_dim = 7 if self.left_arm_only else 14
+        number_parts = len(recording_dict["/observations/parts_poses"][0]) // 7
+
+        # HDF5
+        t_hdf5_save_start = time.time()
+        with h5py.File(recording_path + '.hdf5', 'w', rdcc_nbytes=1024 ** 2 * 2) as root:
+            root.attrs['sim'] = False
+            obs = root.create_group('observations')
+            if self.recording_cams:
+                image = obs.create_group('images')
+                for cam_name in self.image_keys:
+                    _ = image.create_dataset(cam_name, (action_step, 480, 640, 3), dtype='uint8',
+                                         chunks=(1, 480, 640, 3), )
+                # compression='gzip',compression_opts=2,)
+                # compression=32001, compression_opts=(0, 0, 0, 0, 9, 1, 1), shuffle=False)
+            _ = obs.create_dataset('qpos', (action_step, joint_dim))
+            _ = obs.create_dataset('qvel', (action_step, joint_dim))
+            _ = obs.create_dataset('effort', (action_step, joint_dim))
+            _ = obs.create_dataset('parts_poses', (action_step, number_parts * 7))
+            _ = obs.create_dataset('eef_pose', (action_step, 6))
+            _ = root.create_dataset('action', (action_step, joint_dim))
+
+            for name, array in recording_dict.items():
+                root[name][...] = array
+
+            root.attrs['prediction_frequency'] = self.freq_mean
+
+            self.cfg.delete()
+            cfg_as_json = json.dumps({k: v for k, v in self.cfg.items() if k != 'hydra_config'})
+            root.attrs['cfg'] = cfg_as_json
+
+        print(f'Saving: {time.time() - t_hdf5_save_start:.1f} secs')
+        print(f'Saved as: {recording_path}')
 
 def parts_poses_to_euler(parts_poses):
     out_parts_poses = []
